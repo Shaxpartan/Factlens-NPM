@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
-import { extname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, extname } from "node:path";
 import FactLens from "../client.js";
 import { FactLensConfigurationError } from "../errors.js";
 import { SDK_VERSION } from "../http.js";
-import type { RequestOptions, VerifyInput, VerifyResponse } from "../types/index.js";
+import type { LogListOptions, RequestOptions, VerifyInput, VerifyResponse } from "../types/index.js";
 import { clearConfig, configPath, loadConfig, maskSecret, resolveCredentials, saveConfig, type CliConfig } from "./config.js";
 import { exitCodeFor, humanError, serializeError, writeJson, type Writer } from "./output.js";
 
@@ -90,15 +89,22 @@ export async function runCli(argv: string[], dependencies: CliDependencies = {})
       case "keys":
         result = await keysCommand(client, parsed.positionals.slice(1), parsed.flags);
         break;
-      case "logs":
-        result = await client.logs.list({
-          ...projectInput(parsed.flags),
-          ...(flagNumber(parsed.flags, "limit") === undefined ? {} : { limit: flagNumber(parsed.flags, "limit") }),
-          ...(flagString(parsed.flags, "before") ? { before: flagString(parsed.flags, "before") } : {}),
-          ...(flagString(parsed.flags, "endpoint") ? { endpoint: flagString(parsed.flags, "endpoint") } : {}),
-          ...(logStatus(parsed.flags) ? { status: logStatus(parsed.flags) } : {}),
-        }, requestOptions(parsed.flags));
+      case "logs": {
+        const projectId = flagString(parsed.flags, "project");
+        const limit = flagNumber(parsed.flags, "limit");
+        const before = flagString(parsed.flags, "before");
+        const endpoint = flagString(parsed.flags, "endpoint");
+        const status = logStatus(parsed.flags);
+        const input: LogListOptions = {
+          ...(projectId ? { projectId } : {}),
+          ...(limit === undefined ? {} : { limit }),
+          ...(before ? { before } : {}),
+          ...(endpoint ? { endpoint } : {}),
+          ...(status ? { status } : {}),
+        };
+        result = await client.logs.list(input, requestOptions(parsed.flags));
         break;
+      }
       case "request": {
         const requestId = requiredText(parsed.positionals.slice(1).join(" "), "request ID");
         result = await client.logs.get(requestId, requestOptions(parsed.flags));
@@ -472,8 +478,10 @@ function helpText() {
   return `FactLens CLI ${SDK_VERSION}\n\nUsage:\n  factlens configure [--api-key KEY] [--developer-token TOKEN]\n  factlens config show|clear\n  factlens doctor\n  factlens verify <claim> [--json]\n  factlens verify --file claim.txt\n  factlens verify --image image.png --claim "Claim about the image"\n  factlens verify --audio recording.mp3 [--claim "Optional claim"]\n  factlens usage [--account] [--project ID]\n  factlens account\n  factlens projects list\n  factlens projects create <name>\n  factlens projects update <project-id> <name>\n  factlens projects delete <project-id> --yes\n  factlens projects select <project-id>\n  factlens keys list [--project ID]\n  factlens keys create <label> [--project ID]\n  factlens keys revoke <key-id> [--project ID] --yes\n  factlens logs [--project ID] [--limit N] [--endpoint verify] [--status success|failed]\n  factlens request <request-id>\n\nRequest options:\n  --timeout MS       Total client timeout\n  --retries N        Automatic retries (0-5)\n  --request-id UUID  Explicit idempotency/request ID\n  --json             Machine-readable output\n\nCredentials:\n  FACTLENS_API_KEY             Project key for Verify and runtime Usage\n  FACTLENS_DEVELOPER_TOKEN     Developer token for account management\n\nGet credentials: ${DASHBOARD}\n`;
 }
 
-const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
-if (invokedPath && fileURLToPath(import.meta.url) === invokedPath) {
+const invokedPath = process.argv[1] || "";
+const invokedName = basename(invokedPath).toLowerCase();
+const invokedDirectly = invokedName === "factlens" || invokedName === "factlens.cmd" || (invokedName === "index.js" && /[\\/]cli[\\/]index\.js$/i.test(invokedPath));
+if (invokedDirectly) {
   runCli(process.argv.slice(2)).then((code) => { process.exitCode = code; }).catch((error) => {
     process.stderr.write(humanError(error));
     process.exitCode = exitCodeFor(error);
