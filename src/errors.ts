@@ -1,3 +1,5 @@
+export type VerificationStage = "transcription" | "search" | "analysis" | "moderation" | "verification";
+
 export type FactLensErrorOptions = {
   status: number;
   code: string;
@@ -5,6 +7,8 @@ export type FactLensErrorOptions = {
   retryable?: boolean;
   headers?: Headers;
   details?: unknown;
+  stage?: VerificationStage;
+  helpUrl?: string;
   cause?: unknown;
 };
 
@@ -15,6 +19,8 @@ export class FactLensError extends Error {
   readonly retryable: boolean;
   readonly headers: Headers;
   readonly details?: unknown;
+  readonly stage?: VerificationStage;
+  readonly helpUrl?: string;
 
   constructor(message: string, options: FactLensErrorOptions) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause });
@@ -25,15 +31,18 @@ export class FactLensError extends Error {
     this.retryable = options.retryable ?? isRetryableStatus(options.status);
     this.headers = options.headers ?? new Headers();
     this.details = options.details;
+    this.stage = options.stage;
+    this.helpUrl = options.helpUrl;
   }
 }
 
 export class FactLensConfigurationError extends FactLensError {
-  constructor(message: string, options: { cause?: unknown } = {}) {
+  constructor(message: string, options: { cause?: unknown; helpUrl?: string } = {}) {
     super(message, {
       status: 0,
       code: "CONFIGURATION_ERROR",
       retryable: false,
+      ...(options.helpUrl === undefined ? {} : { helpUrl: options.helpUrl }),
       ...(options.cause === undefined ? {} : { cause: options.cause }),
     });
     this.name = "FactLensConfigurationError";
