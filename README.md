@@ -163,6 +163,8 @@ await staging.verify({ mode: "text", claim: "..." });
 Every request method supports timeout, cancellation, request IDs, and retry control:
 
 ```ts
+import { randomUUID } from "node:crypto";
+
 const controller = new AbortController();
 
 await factlens.verify(
@@ -170,7 +172,7 @@ await factlens.verify(
   {
     signal: controller.signal,
     timeout: 45_000,
-    requestId: crypto.randomUUID(),
+    requestId: randomUUID(),
     maxRetries: 2,
   },
 );

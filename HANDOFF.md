@@ -25,7 +25,7 @@ Updated: 2026-08-10
 - Offline mocked tests: 16/16 passed; no FactLens API availability was required.
 - Examples type-check: passed.
 - `npm pack --dry-run`: passed; `factlens-1.0.0.tgz`, 67 files, 19.0 kB compressed, 112.6 kB unpacked.
-- Fresh packed consumer install: CommonJS passed; ESM passed on Node.js 18.20.8.
+- Fresh packed consumer install: CommonJS passed; ESM passed on Node.js 18.20.8. Automatic request IDs use Node's stable `node:crypto` API rather than the newer global Web Crypto binding.
 - Production dependency audit: 0 vulnerabilities.
 - `prepack` rebuilds the package so manually packed/published output cannot be stale.
 

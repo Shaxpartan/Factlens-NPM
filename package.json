@@ -54,6 +54,7 @@
   },
   "homepage": "https://api.factlens.pro/docs",
   "devDependencies": {
+    "@types/node": "^18.19.130",
     "typescript": "7.0.2"
   }
 }

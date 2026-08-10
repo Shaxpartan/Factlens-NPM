@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { FactLensConfigurationError, FactLensError, isRetryableStatus } from "./errors.js";
 import type { RequestOptions } from "./types/index.js";
 
@@ -169,7 +170,7 @@ function resolveRequestId(value: string | undefined, automatic: boolean) {
     }
     return value;
   }
-  return automatic ? crypto.randomUUID() : undefined;
+  return automatic ? randomUUID() : undefined;
 }
 
 async function responseBody(response: Response): Promise<unknown> {
