@@ -67,36 +67,6 @@ export type VerifyResponse = RuntimeResponse & {
   sources?: Array<{ url: string; title?: string; [key: string]: unknown }>;
 };
 
-export type SearchInput = {
-  query: string;
-  count?: number;
-  results_per_search?: number;
-};
-
-export type SearchResponse = RuntimeResponse & {
-  results?: Array<{ url?: string; title?: string; snippet?: string; [key: string]: unknown }>;
-};
-
-export type AiInput = {
-  prompt: string;
-  image_base64?: string;
-  response_format?: "json" | "text";
-};
-
-export type AiResponse<T = unknown> = RuntimeResponse & {
-  output?: T;
-};
-
-export type TranscribeInput = {
-  audio: Uint8Array | ArrayBuffer;
-  contentType?: string;
-  language?: string;
-};
-
-export type TranscribeResponse = RuntimeResponse & {
-  transcript?: string;
-};
-
 export type Account = {
   id?: string;
   user_id?: string;
