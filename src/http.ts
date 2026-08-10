@@ -12,6 +12,8 @@ type TransportConfig = {
   apiKey?: string;
   developerToken?: string;
   baseUrl: string;
+  runtimeBaseUrl?: string;
+  managementBaseUrl?: string;
   fetch: typeof globalThis.fetch;
 };
 
@@ -39,13 +41,16 @@ const stages = new Set<VerificationStage>(["transcription", "search", "analysis"
 export class HttpTransport {
   private readonly apiKey: string | undefined;
   private readonly developerToken: string | undefined;
-  private readonly baseUrl: string;
+  private readonly runtimeBaseUrl: string;
+  private readonly managementBaseUrl: string;
   private readonly fetch: typeof globalThis.fetch;
 
   constructor(config: TransportConfig) {
     this.apiKey = cleanCredential(config.apiKey);
     this.developerToken = cleanCredential(config.developerToken);
-    this.baseUrl = config.baseUrl.replace(/\/+$/, "");
+    const shared = normalizeBaseUrl(config.baseUrl);
+    this.runtimeBaseUrl = normalizeBaseUrl(config.runtimeBaseUrl ?? shared);
+    this.managementBaseUrl = normalizeBaseUrl(config.managementBaseUrl ?? shared);
     this.fetch = config.fetch;
   }
 
@@ -66,6 +71,7 @@ export class HttpTransport {
     const timeout = boundedInteger(options.timeout, request.timeout, 1, 600_000);
     const deadline = Date.now() + timeout;
     const requestId = resolveRequestId(options.requestId, Boolean(request.automaticRequestId));
+    const baseUrl = request.auth === "runtime" ? this.runtimeBaseUrl : this.managementBaseUrl;
     let attempt = 0;
 
     while (true) {
@@ -90,7 +96,7 @@ export class HttpTransport {
 
       let response: Response;
       try {
-        response = await this.fetch(`${this.baseUrl}${path}`, {
+        response = await this.fetch(`${baseUrl}${path}`, {
           method: request.method,
           headers,
           ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
@@ -165,6 +171,18 @@ export class HttpTransport {
 function cleanCredential(value: string | undefined) {
   const result = String(value ?? "").trim();
   return result || undefined;
+}
+
+function normalizeBaseUrl(value: string) {
+  const result = String(value ?? "").trim().replace(/\/+$/, "");
+  if (!result) throw new FactLensConfigurationError("A FactLens API base URL is required.");
+  try {
+    const url = new URL(result);
+    if (!/^https?:$/.test(url.protocol)) throw new Error("protocol");
+  } catch (cause) {
+    throw new FactLensConfigurationError("FactLens API base URLs must be valid HTTP or HTTPS URLs.", { cause });
+  }
+  return result;
 }
 
 function boundedInteger(value: number | undefined, fallback: number, minimum: number, maximum: number) {
