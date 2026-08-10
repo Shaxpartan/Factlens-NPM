@@ -1,11 +1,14 @@
 {
   "name": "factlens",
   "version": "1.0.0",
-  "description": "Official Node.js and TypeScript SDK for the FactLens API",
+  "description": "Official Node.js, TypeScript SDK, and CLI for the FactLens verification API",
   "type": "commonjs",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",
+  "bin": {
+    "factlens": "./dist/esm/cli/index.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
@@ -41,7 +44,8 @@
     "fact-checking",
     "verification",
     "typescript",
-    "sdk"
+    "sdk",
+    "cli"
   ],
   "author": "FactLens",
   "license": "MIT",
