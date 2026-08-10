@@ -2,6 +2,8 @@ export type FactLensClientOptions = {
   apiKey?: string;
   developerToken?: string;
   baseUrl?: string;
+  runtimeBaseUrl?: string;
+  managementBaseUrl?: string;
   dangerouslyAllowBrowser?: boolean;
   fetch?: typeof globalThis.fetch;
 };
