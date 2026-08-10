@@ -18,6 +18,8 @@ type NormalizedClientOptions = {
   apiKey?: string;
   developerToken?: string;
   baseUrl: string;
+  runtimeBaseUrl: string;
+  managementBaseUrl: string;
   dangerouslyAllowBrowser: boolean;
   fetch: typeof globalThis.fetch;
 };
@@ -47,10 +49,16 @@ export default class FactLens {
       throw new FactLensConfigurationError("A Fetch API implementation is required. FactLens supports Node.js 18 or newer.");
     }
 
+    const baseUrl = clean(options.baseUrl) ?? DEFAULT_BASE_URL;
+    const runtimeBaseUrl = clean(options.runtimeBaseUrl ?? environment("FACTLENS_RUNTIME_BASE_URL")) ?? baseUrl;
+    const managementBaseUrl = clean(options.managementBaseUrl ?? environment("FACTLENS_MANAGEMENT_BASE_URL")) ?? baseUrl;
+
     this.config = {
       ...(apiKey === undefined ? {} : { apiKey }),
       ...(developerToken === undefined ? {} : { developerToken }),
-      baseUrl: clean(options.baseUrl) ?? DEFAULT_BASE_URL,
+      baseUrl,
+      runtimeBaseUrl,
+      managementBaseUrl,
       dangerouslyAllowBrowser,
       fetch: fetchImplementation,
     };
