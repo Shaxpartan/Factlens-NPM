@@ -35,6 +35,7 @@ const factlens = new FactLens({
 });
 
 const result = await factlens.verify({
+  mode: "text",
   claim: "The Eiffel Tower is in Paris.",
 });
 
@@ -47,7 +48,7 @@ The SDK also reads `FACTLENS_API_KEY` automatically in Node.js:
 
 ```ts
 const factlens = new FactLens();
-const result = await factlens.verify({ claim: "Example claim" });
+const result = await factlens.verify({ mode: "text", claim: "Example claim" });
 ```
 
 ## Runtime API
@@ -154,7 +155,7 @@ To use another project's runtime key, create a child client:
 
 ```ts
 const staging = factlens.withApiKey(process.env.FACTLENS_STAGING_API_KEY!);
-await staging.verify({ claim: "..." });
+await staging.verify({ mode: "text", claim: "..." });
 ```
 
 ## Request control
@@ -165,7 +166,7 @@ Every request method supports timeout, cancellation, request IDs, and retry cont
 const controller = new AbortController();
 
 await factlens.verify(
-  { claim: "..." },
+  { mode: "text", claim: "..." },
   {
     signal: controller.signal,
     timeout: 45_000,
@@ -183,7 +184,7 @@ Chargeable requests automatically receive an `X-Request-ID`. Retries reuse the s
 import FactLens, { FactLensError } from "factlens";
 
 try {
-  await factlens.verify({ claim: "..." });
+  await factlens.verify({ mode: "text", claim: "..." });
 } catch (error) {
   if (error instanceof FactLensError) {
     console.error(error.status);

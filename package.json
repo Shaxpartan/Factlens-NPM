@@ -1,0 +1,59 @@
+{
+  "name": "factlens",
+  "version": "1.0.0",
+  "description": "Official Node.js and TypeScript SDK for the FactLens API",
+  "type": "commonjs",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run clean && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && tsc -p tsconfig.types.json && node scripts/finalize-build.mjs",
+    "prepack": "npm run build",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "test:examples": "npm run build && tsc -p tsconfig.examples.json --noEmit",
+    "check": "npm run typecheck && npm test && npm run test:examples && npm pack --dry-run"
+  },
+  "keywords": [
+    "fact-checking",
+    "verification",
+    "typescript",
+    "sdk"
+  ],
+  "author": "FactLens",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shaxpartan/Factlens-NPM.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Shaxpartan/Factlens-NPM/issues"
+  },
+  "homepage": "https://api.factlens.pro/docs",
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}
