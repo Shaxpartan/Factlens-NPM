@@ -6,14 +6,8 @@ import { LogsResource } from "./resources/logs.js";
 import { ProjectsResource } from "./resources/projects.js";
 import { UsageResource } from "./resources/usage.js";
 import type {
-  AiInput,
-  AiResponse,
   FactLensClientOptions,
   RequestOptions,
-  SearchInput,
-  SearchResponse,
-  TranscribeInput,
-  TranscribeResponse,
   VerifyInput,
   VerifyResponse,
 } from "./types/index.js";
@@ -79,43 +73,6 @@ export default class FactLens {
     });
   }
 
-  search(input: SearchInput, options?: RequestOptions) {
-    return this.transport.request<SearchResponse>("/v1/search", {
-      method: "POST",
-      auth: "runtime",
-      body: input,
-      timeout: 60_000,
-      automaticRequestId: true,
-      ...(options === undefined ? {} : { options }),
-    });
-  }
-
-  ai<T = unknown>(input: AiInput, options?: RequestOptions) {
-    return this.transport.request<AiResponse<T>>("/v1/ai", {
-      method: "POST",
-      auth: "runtime",
-      body: input,
-      timeout: 60_000,
-      automaticRequestId: true,
-      ...(options === undefined ? {} : { options }),
-    });
-  }
-
-  transcribe(input: TranscribeInput, options?: RequestOptions) {
-    return this.transport.request<TranscribeResponse>("/v1/transcribe", {
-      method: "POST",
-      auth: "runtime",
-      body: {
-        audio_base64: base64(input.audio),
-        ...(input.contentType === undefined ? {} : { content_type: input.contentType }),
-        ...(input.language === undefined ? {} : { language: input.language }),
-      },
-      timeout: 180_000,
-      automaticRequestId: true,
-      ...(options === undefined ? {} : { options }),
-    });
-  }
-
   withApiKey(apiKey: string) {
     return new FactLens({
       ...this.config,
@@ -139,13 +96,4 @@ function environment(name: string) {
 function browserLike() {
   const globals = globalThis as typeof globalThis & { window?: unknown; document?: unknown };
   return globals.window !== undefined && globals.document !== undefined;
-}
-
-function base64(value: Uint8Array | ArrayBuffer) {
-  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  }
-  return btoa(binary);
 }
