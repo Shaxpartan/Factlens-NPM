@@ -18,9 +18,9 @@ export class FactLensError extends Error {
   readonly requestId: string | undefined;
   readonly retryable: boolean;
   readonly headers: Headers;
-  readonly details?: unknown;
-  readonly stage?: VerificationStage;
-  readonly helpUrl?: string;
+  readonly details: unknown;
+  readonly stage: VerificationStage | undefined;
+  readonly helpUrl: string | undefined;
 
   constructor(message: string, options: FactLensErrorOptions) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause });
