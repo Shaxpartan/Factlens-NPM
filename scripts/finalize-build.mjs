@@ -12,36 +12,17 @@ await writeFile(
   "utf8",
 );
 
-const helpFirst = [
-  '    const command = parsed.positionals[0];',
-  '    if (!command || command === "help" || flagBoolean(parsed.flags, "help")) {',
-  '      context.writeOut(helpText());',
-  '      return 0;',
-  '    }',
-  '    if (command === "--version" || command === "version" || flagBoolean(parsed.flags, "version")) {',
-  '      context.writeOut(`${SDK_VERSION}\\n`);',
-  '      return 0;',
-  '    }',
-].join("\n");
-
-const versionFirst = [
-  '    const command = parsed.positionals[0];',
-  '    if (command === "--version" || command === "version" || flagBoolean(parsed.flags, "version")) {',
-  '      context.writeOut(`${SDK_VERSION}\\n`);',
-  '      return 0;',
-  '    }',
-  '    if (!command || command === "help" || flagBoolean(parsed.flags, "help")) {',
-  '      context.writeOut(helpText());',
-  '      return 0;',
-  '    }',
-].join("\n");
+const helpCondition =
+  'if (!command || command === "--help" || command === "help" || flagBoolean(parsed.flags, "help")) {';
+const versionSafeHelpCondition =
+  'if ((!command && !flagBoolean(parsed.flags, "version")) || command === "--help" || command === "help" || flagBoolean(parsed.flags, "help")) {';
 
 for (const target of ["../dist/esm/cli/index.js", "../dist/cjs/cli/index.js"]) {
   const cli = new URL(target, import.meta.url);
   const source = await readFile(cli, "utf8");
   let finalized = source;
-  if (source.includes(helpFirst)) finalized = source.replace(helpFirst, versionFirst);
-  else if (!source.includes(versionFirst)) throw new Error(`FactLens CLI build has an unexpected command-dispatch shape: ${target}`);
+  if (source.includes(helpCondition)) finalized = source.replace(helpCondition, versionSafeHelpCondition);
+  else if (!source.includes(versionSafeHelpCondition)) throw new Error(`FactLens CLI build has an unexpected command-dispatch shape: ${target}`);
   if (finalized !== source) await writeFile(cli, finalized, "utf8");
 }
 
