@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { FactLensConfigurationError, FactLensError, isRetryableStatus } from "./errors.js";
+import type { VerificationStage } from "./errors.js";
 import type { RequestOptions } from "./types/index.js";
 
 export const SDK_VERSION = "1.0.0";
+export const FACTLENS_DASHBOARD_URL = "https://api.factlens.pro/dashboard";
 
 type AuthKind = "runtime" | "management";
 
@@ -10,6 +12,8 @@ type TransportConfig = {
   apiKey?: string;
   developerToken?: string;
   baseUrl: string;
+  runtimeBaseUrl?: string;
+  managementBaseUrl?: string;
   fetch: typeof globalThis.fetch;
 };
 
@@ -27,30 +31,38 @@ type ErrorBody = {
   message?: unknown;
   request_id?: unknown;
   details?: unknown;
+  stage?: unknown;
+  help_url?: unknown;
 };
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const stages = new Set<VerificationStage>(["transcription", "search", "analysis", "moderation", "verification"]);
 
 export class HttpTransport {
   private readonly apiKey: string | undefined;
   private readonly developerToken: string | undefined;
-  private readonly baseUrl: string;
+  private readonly runtimeBaseUrl: string;
+  private readonly managementBaseUrl: string;
   private readonly fetch: typeof globalThis.fetch;
 
   constructor(config: TransportConfig) {
     this.apiKey = cleanCredential(config.apiKey);
     this.developerToken = cleanCredential(config.developerToken);
-    this.baseUrl = config.baseUrl.replace(/\/+$/, "");
+    const shared = normalizeBaseUrl(config.baseUrl);
+    this.runtimeBaseUrl = normalizeBaseUrl(config.runtimeBaseUrl ?? shared);
+    this.managementBaseUrl = normalizeBaseUrl(config.managementBaseUrl ?? shared);
     this.fetch = config.fetch;
   }
 
   async request<T>(path: string, request: TransportRequest): Promise<T> {
     const token = request.auth === "runtime" ? this.apiKey : this.developerToken;
     if (!token) {
+      const runtime = request.auth === "runtime";
       throw new FactLensConfigurationError(
-        request.auth === "runtime"
-          ? "A FactLens project API key is required for this method."
-          : "A FactLens developer token is required for this method.",
+        runtime
+          ? `A FactLens project API key is required. Create or copy one at ${FACTLENS_DASHBOARD_URL}, then set FACTLENS_API_KEY or run factlens configure.`
+          : `A FactLens developer token is required. Create one at ${FACTLENS_DASHBOARD_URL}, then set FACTLENS_DEVELOPER_TOKEN or run factlens configure.`,
+        { helpUrl: FACTLENS_DASHBOARD_URL },
       );
     }
 
@@ -59,6 +71,7 @@ export class HttpTransport {
     const timeout = boundedInteger(options.timeout, request.timeout, 1, 600_000);
     const deadline = Date.now() + timeout;
     const requestId = resolveRequestId(options.requestId, Boolean(request.automaticRequestId));
+    const baseUrl = request.auth === "runtime" ? this.runtimeBaseUrl : this.managementBaseUrl;
     let attempt = 0;
 
     while (true) {
@@ -83,7 +96,7 @@ export class HttpTransport {
 
       let response: Response;
       try {
-        response = await this.fetch(`${this.baseUrl}${path}`, {
+        response = await this.fetch(`${baseUrl}${path}`, {
           method: request.method,
           headers,
           ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
@@ -107,7 +120,7 @@ export class HttpTransport {
           attempt += 1;
           continue;
         }
-        throw new FactLensError("FactLens API could not be reached.", {
+        throw new FactLensError("FactLens API could not be reached. Check your network connection and the configured API URL.", {
           status: 0,
           code: "NETWORK_ERROR",
           requestId,
@@ -137,17 +150,20 @@ export class HttpTransport {
         continue;
       }
 
-      throw new FactLensError(
-        textValue(errorBody.message) || `FactLens API returned HTTP ${response.status}.`,
-        {
-          status: response.status,
-          code,
-          requestId: effectiveRequestId,
-          retryable,
-          headers: new Headers(response.headers),
-          ...(errorBody.details === undefined ? {} : { details: errorBody.details }),
-        },
-      );
+      const helpUrl = credentialHelpUrl(code) || textValue(errorBody.help_url);
+      const message = actionableMessage(code, textValue(errorBody.message), helpUrl, response.status);
+      const stage = verificationStage(errorBody.stage);
+
+      throw new FactLensError(message, {
+        status: response.status,
+        code,
+        requestId: effectiveRequestId,
+        retryable,
+        headers: new Headers(response.headers),
+        ...(errorBody.details === undefined ? {} : { details: errorBody.details }),
+        ...(stage === undefined ? {} : { stage }),
+        ...(helpUrl === undefined ? {} : { helpUrl }),
+      });
     }
   }
 }
@@ -155,6 +171,18 @@ export class HttpTransport {
 function cleanCredential(value: string | undefined) {
   const result = String(value ?? "").trim();
   return result || undefined;
+}
+
+function normalizeBaseUrl(value: string) {
+  const result = String(value ?? "").trim().replace(/\/+$/, "");
+  if (!result) throw new FactLensConfigurationError("A FactLens API base URL is required.");
+  try {
+    const url = new URL(result);
+    if (!/^https?:$/.test(url.protocol)) throw new Error("protocol");
+  } catch (cause) {
+    throw new FactLensConfigurationError("FactLens API base URLs must be valid HTTP or HTTPS URLs.", { cause });
+  }
+  return result;
 }
 
 function boundedInteger(value: number | undefined, fallback: number, minimum: number, maximum: number) {
@@ -202,13 +230,33 @@ function delay(milliseconds: number) {
 }
 
 function timeoutError(requestId?: string, cause?: unknown) {
-  return new FactLensError("The FactLens request timed out.", {
+  return new FactLensError("The FactLens request timed out. Retry with a new request ID if the previous request did not complete.", {
     status: 0,
     code: "REQUEST_TIMEOUT",
     requestId,
     retryable: true,
     ...(cause === undefined ? {} : { cause }),
   });
+}
+
+function credentialHelpUrl(code: string) {
+  return ["API_KEY_INVALID", "DEVELOPER_TOKEN_INVALID", "API_PROJECT_KEY_NOT_ALLOWED"].includes(code)
+    ? FACTLENS_DASHBOARD_URL
+    : undefined;
+}
+
+function actionableMessage(code: string, message: string | undefined, helpUrl: string | undefined, status: number) {
+  const base = message || `FactLens API returned HTTP ${status}.`;
+  if (!helpUrl) return base;
+  if (code === "API_PROJECT_KEY_NOT_ALLOWED") {
+    return `${base} This operation requires a developer token. Create or copy the correct credential at ${helpUrl}.`;
+  }
+  return `${base} Create or copy a valid credential at ${helpUrl}.`;
+}
+
+function verificationStage(value: unknown): VerificationStage | undefined {
+  const text = textValue(value) as VerificationStage | undefined;
+  return text && stages.has(text) ? text : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

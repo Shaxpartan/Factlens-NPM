@@ -1,38 +1,197 @@
-# FactLens Node.js & TypeScript SDK
+# FactLens SDK & CLI
 
 [![npm version](https://img.shields.io/npm/v/factlens.svg)](https://www.npmjs.com/package/factlens)
 [![CI](https://github.com/Shaxpartan/Factlens-NPM/actions/workflows/ci.yml/badge.svg)](https://github.com/Shaxpartan/Factlens-NPM/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-31f50a.svg)](LICENSE)
 
-The official server-side Node.js and TypeScript SDK for the FactLens API.
+The official Node.js, TypeScript SDK, and command-line interface for the FactLens verification API.
 
-FactLens separates two security boundaries:
+FactLens exposes a focused public runtime: **Verify**. Transcription, current-web evidence retrieval, safety checks, and AI analysis are internal stages of the verification pipeline rather than standalone customer services.
 
-- **Project API keys** call Verify, Search, AI, Transcribe, and runtime usage. Each key is bound to one project by the server.
-- **Developer tokens** manage your developer account: projects, API keys, account usage, project logs, and request inspection.
-
-Balance and throughput are account-wide. Keys, logs, requests, and metrics remain project-attributed.
-
-> This repository is prepared for npm publication, but `factlens` is not published from this repository until a FactLens maintainer runs the release workflow.
+Node.js 18 or newer is required.
 
 ## Install
+
+Install the SDK in a project:
 
 ```bash
 npm install factlens
 ```
 
-Node.js 18 or newer is required.
+That local package also contains the CLI:
 
-## Quick start
+```bash
+npx factlens --help
+npx factlens verify "Earth orbits the Sun."
+```
 
-Create a project API key in the [FactLens developer dashboard](https://api.factlens.pro/dashboard), store it in server-side secret storage, and initialize the client:
+If you want the bare `factlens` command available from any directory:
+
+```bash
+npm install -g factlens
+factlens --help
+```
+
+It is one package, not separate SDK and CLI packages.
+
+## Get credentials
+
+Open the FactLens developer dashboard:
+
+`https://api.factlens.pro/dashboard`
+
+For runtime verification:
+
+1. Sign in.
+2. Create or select a project.
+3. Create a project API key.
+4. Copy the secret immediately; it is shown once.
+5. Store it as `FACTLENS_API_KEY` or save it with `factlens configure`.
+
+For account-management operations, also create a developer token and store it as `FACTLENS_DEVELOPER_TOKEN` or save it with the CLI.
+
+Project API keys and developer tokens are deliberately separate credentials:
+
+| Credential | Used for |
+|---|---|
+| Project API key | Verify and runtime usage |
+| Developer token | Account, projects, keys, account usage, logs, request inspection |
+
+Environment variables override saved CLI configuration.
+
+## CLI quick start
+
+```bash
+factlens configure
+factlens doctor
+factlens verify "The Eiffel Tower is in Paris."
+```
+
+Non-interactive configuration is also supported:
+
+```bash
+factlens configure \
+  --api-key fl_live_YOUR_KEY \
+  --developer-token fldev_live_YOUR_TOKEN
+```
+
+For CI and servers, prefer environment variables:
+
+```bash
+export FACTLENS_API_KEY=fl_live_YOUR_KEY
+export FACTLENS_DEVELOPER_TOKEN=fldev_live_YOUR_TOKEN
+```
+
+On Windows CMD:
+
+```cmd
+set FACTLENS_API_KEY=fl_live_YOUR_KEY
+set FACTLENS_DEVELOPER_TOKEN=fldev_live_YOUR_TOKEN
+```
+
+### Verify text
+
+```bash
+factlens verify "Earth orbits the Sun."
+```
+
+Or with a local package install:
+
+```bash
+npx factlens verify "Earth orbits the Sun."
+```
+
+### Verify an image or post
+
+```bash
+factlens verify --image screenshot.png --claim "This image was taken in London."
+```
+
+Supported image inputs are PNG, JPEG, WebP, and GIF.
+
+### Verify audio or video content
+
+```bash
+factlens verify --audio interview.mp3
+factlens verify --audio clip.m4a --claim "The speaker says inflation is 3%."
+```
+
+The CLI sends the media to **Verify**. FactLens transcribes it internally when required; there is no standalone transcription command.
+
+### Verify a text file
+
+```bash
+factlens verify --file claim.txt
+```
+
+### JSON output
+
+```bash
+factlens verify "Earth orbits the Sun." --json
+```
+
+JSON mode is designed for scripts and CI. Successful data is written to stdout; structured errors are written to stderr.
+
+### Request controls
+
+```bash
+factlens verify "A claim" \
+  --timeout 90000 \
+  --retries 2 \
+  --request-id 01914f52-79f6-4d4f-b456-426614174000
+```
+
+### Runtime usage
+
+```bash
+factlens usage
+```
+
+### Configuration and diagnostics
+
+```bash
+factlens configure
+factlens config show
+factlens config clear
+factlens doctor
+```
+
+`config show` masks secrets. Saved configuration lives in the operating-system user configuration directory, not in your project directory.
+
+### Management commands
+
+Management commands require a developer token:
+
+```bash
+factlens account
+
+factlens projects list
+factlens projects create "Production"
+factlens projects update PROJECT_ID "Production API"
+factlens projects select PROJECT_ID
+factlens projects delete PROJECT_ID --yes
+
+factlens keys list
+factlens keys create "Backend"
+factlens keys revoke KEY_ID --yes
+
+factlens usage --account
+factlens logs --limit 50 --endpoint verify
+factlens request REQUEST_ID
+```
+
+Use `--project PROJECT_ID` to override the selected management project for project-scoped commands. Destructive actions require `--yes`.
+
+A newly created project API key is shown once. Store it immediately.
+
+## SDK quick start
+
+The SDK automatically reads `FACTLENS_API_KEY` and `FACTLENS_DEVELOPER_TOKEN` in Node.js.
 
 ```ts
 import FactLens from "factlens";
 
-const factlens = new FactLens({
-  apiKey: process.env.FACTLENS_API_KEY!,
-});
+const factlens = new FactLens();
 
 const result = await factlens.verify({
   mode: "text",
@@ -41,74 +200,60 @@ const result = await factlens.verify({
 
 console.log(result.verdictId);
 console.log(result.explanation);
-console.log(result.usage);
+console.log(result.sources);
 ```
 
-The SDK also reads `FACTLENS_API_KEY` automatically in Node.js:
+You can also pass credentials explicitly:
 
 ```ts
-const factlens = new FactLens();
-const result = await factlens.verify({ mode: "text", claim: "Example claim" });
+const factlens = new FactLens({
+  apiKey: process.env.FACTLENS_API_KEY,
+  developerToken: process.env.FACTLENS_DEVELOPER_TOKEN,
+});
 ```
 
-## Runtime API
-
-### Verify
+### Verify text
 
 ```ts
 const result = await factlens.verify({
-  claim: "Example claim",
   mode: "text",
+  claim: "Earth orbits the Sun.",
 });
 ```
 
-Image and audio/video verification use the same method:
+### Verify an image or post
 
 ```ts
-await factlens.verify({
+const result = await factlens.verify({
   mode: "image_post",
-  claim: "The image shows the stated event.",
+  claim: "This screenshot is from the stated event.",
   image_base64: imageBase64,
+  content_type: "image/png",
 });
+```
 
-await factlens.verify({
+### Verify audio or video
+
+```ts
+const result = await factlens.verify({
   mode: "audio_video",
   audio_base64: audioBase64,
-  content_type: "audio/webm",
+  content_type: "audio/mpeg",
 });
+
+console.log(result.transcript);
+console.log(result.verdictId);
 ```
 
-### Search
+If you already have a transcript, send it through Verify instead of uploading audio:
 
 ```ts
-const result = await factlens.search({
-  query: "primary sources about the claim",
-  count: 10,
+await factlens.verify({
+  mode: "audio_video",
+  transcript: existingTranscript,
+  claim: "Optional specific claim to verify",
 });
 ```
-
-### AI
-
-```ts
-const result = await factlens.ai<{ summary: string }>({
-  prompt: "Return JSON with a concise summary.",
-  response_format: "json",
-});
-```
-
-### Transcribe
-
-```ts
-import { readFile } from "node:fs/promises";
-
-const audio = await readFile("clip.webm");
-const result = await factlens.transcribe({
-  audio,
-  contentType: "audio/webm",
-});
-```
-
-`Buffer` works directly because it is a `Uint8Array` in Node.js.
 
 ### Runtime usage
 
@@ -116,16 +261,10 @@ const result = await factlens.transcribe({
 const usage = await factlens.usage.get();
 ```
 
-## Account management
-
-Account management uses a separate developer token. Create one under **Dashboard → Account → Developer tokens**, then store it as `FACTLENS_DEVELOPER_TOKEN`.
+## SDK management
 
 ```ts
-const factlens = new FactLens({
-  apiKey: process.env.FACTLENS_API_KEY,
-  developerToken: process.env.FACTLENS_DEVELOPER_TOKEN,
-});
-
+const account = await factlens.account.get();
 const projects = await factlens.projects.list();
 const project = await factlens.projects.create({ name: "Production" });
 
@@ -134,24 +273,14 @@ factlens.projects.select(project.id);
 const createdKey = await factlens.keys.create({ label: "Backend" });
 console.log(createdKey.api_key); // shown once
 
-const account = await factlens.account.get();
-const usage = await factlens.usage.getAccount();
+const accountUsage = await factlens.usage.getAccount();
 const logs = await factlens.logs.list({ limit: 50 });
+const request = await factlens.logs.get("REQUEST_ID");
 ```
 
-### Project selection
+`projects.select()` only changes the default project for management calls. Runtime project identity is bound to the project API key by the server.
 
-`projects.select()` changes the default project for **management calls only**:
-
-```ts
-factlens.projects.select(projectId);
-await factlens.keys.list();
-await factlens.logs.list();
-```
-
-It cannot change the project used by a runtime API key. Runtime project identity is bound to the key by the FactLens API.
-
-To use another project's runtime key, create a child client:
+To use another project's runtime key, create another client:
 
 ```ts
 const staging = factlens.withApiKey(process.env.FACTLENS_STAGING_API_KEY!);
@@ -160,7 +289,7 @@ await staging.verify({ mode: "text", claim: "..." });
 
 ## Request control
 
-Every request method supports timeout, cancellation, request IDs, and retry control:
+SDK requests support timeout, cancellation, request IDs, and bounded retries:
 
 ```ts
 import { randomUUID } from "node:crypto";
@@ -171,16 +300,18 @@ await factlens.verify(
   { mode: "text", claim: "..." },
   {
     signal: controller.signal,
-    timeout: 45_000,
+    timeout: 90_000,
     requestId: randomUUID(),
     maxRetries: 2,
   },
 );
 ```
 
-Chargeable requests automatically receive an `X-Request-ID`. Retries reuse the same request ID so the FactLens API can return the existing result instead of charging or executing the request twice.
+Verify automatically receives an `X-Request-ID` when you do not provide one. Automatic retries within one invocation reuse that request ID so an in-progress or completed idempotent request is not executed twice.
 
 ## Errors
+
+FactLens errors are structured and actionable.
 
 ```ts
 import FactLens, { FactLensError } from "factlens";
@@ -189,25 +320,62 @@ try {
   await factlens.verify({ mode: "text", claim: "..." });
 } catch (error) {
   if (error instanceof FactLensError) {
-    console.error(error.status);
     console.error(error.code);
+    console.error(error.status);
     console.error(error.requestId);
     console.error(error.retryable);
+    console.error(error.stage);
+    console.error(error.details);
+    console.error(error.helpUrl);
   }
 }
 ```
+
+Verification-stage failures identify the stage without exposing managed provider credentials:
+
+| Error code | Stage |
+|---|---|
+| `VERIFICATION_TRANSCRIPTION_FAILED` | `transcription` |
+| `VERIFICATION_SEARCH_FAILED` | `search` |
+| `VERIFICATION_ANALYSIS_FAILED` | `analysis` |
+| `VERIFICATION_MODERATION_FAILED` | `moderation` |
+| `VERIFICATION_FAILED` | `verification` |
+
+Credential errors direct developers to `https://api.factlens.pro/dashboard` to create or copy the correct credential.
+
+The SDK retries network errors, `408`, `429`, retryable `5xx`, and `409 REQUEST_IN_PROGRESS` within the configured retry budget. It does not retry ordinary validation, authentication, quota, billing, ownership, or request-ID conflict errors.
 
 See [Errors and retries](docs/errors-and-retries.md).
 
 ## Browser safety
 
-FactLens credentials are server secrets. The SDK refuses to initialize with a secret credential in a browser-like environment by default.
+FactLens credentials are secrets. The SDK refuses to initialize with secret credentials in a browser-like environment by default.
 
-If you deliberately understand and accept that risk, `dangerouslyAllowBrowser: true` exists as an explicit escape hatch. It should not be used for production secret keys.
+`dangerouslyAllowBrowser: true` exists only as an explicit escape hatch for environments where you fully control the credential exposure. It should not be used with production secrets.
+
+## Direct Supabase testing
+
+Production defaults remain `https://api.factlens.pro`. For controlled backend testing, the SDK can route runtime and management calls independently:
+
+```ts
+const factlens = new FactLens({
+  runtimeBaseUrl: process.env.FACTLENS_RUNTIME_BASE_URL,
+  managementBaseUrl: process.env.FACTLENS_MANAGEMENT_BASE_URL,
+});
+```
+
+The CLI accepts the same test-only overrides through environment variables:
+
+```bash
+FACTLENS_RUNTIME_BASE_URL=...
+FACTLENS_MANAGEMENT_BASE_URL=...
+```
+
+Do not hard-code these overrides into production application code.
 
 ## Limits
 
-Current platform limits are account-wide:
+Current developer-account limits are account-wide:
 
 | | Free | Paid |
 |---|---:|---:|
@@ -217,7 +385,19 @@ Current platform limits are account-wide:
 | Throughput | 20/min shared | 60/min shared |
 | Purchased balance | — | Shared across all projects |
 
+Keys, logs, requests, and metrics remain project-attributed.
+
 See [Usage and limits](docs/usage-and-limits.md).
+
+## Package contents
+
+The npm package uses an explicit allowlist. Published artifacts contain the compiled `dist` output plus the package metadata/documentation files listed in `package.json`; source tests, repository workflows, local config, and development files are not part of the npm tarball.
+
+You can inspect the exact package contents before publishing:
+
+```bash
+npm pack --dry-run
+```
 
 ## Documentation
 
@@ -229,7 +409,7 @@ See [Usage and limits](docs/usage-and-limits.md).
 - [Errors and retries](docs/errors-and-retries.md)
 - [TypeScript](docs/typescript.md)
 - [Publishing](docs/publishing.md)
-- [Full HTTP API documentation](https://api.factlens.pro/docs)
+- Full HTTP documentation: `https://api.factlens.pro/docs`
 
 ## Security
 

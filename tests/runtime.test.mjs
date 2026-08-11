@@ -27,7 +27,7 @@ test("verify sends the project key, SDK metadata, JSON body, and one UUID reques
   assert.equal(result.verdictId, "TRUE");
 });
 
-test("runtime retries reuse the request ID and respect retryable response classes", async () => {
+test("verify retries reuse the request ID and respect retryable response classes", async () => {
   const ids = [];
   let attempt = 0;
   const client = new FactLens({
@@ -41,12 +41,12 @@ test("runtime retries reuse the request ID and respect retryable response classe
           { status: 503, headers: { "Retry-After": "0" } },
         );
       }
-      return Response.json({ request_id: ids[0], output: "ok" });
+      return Response.json({ request_id: ids[0], verdictId: "TRUE" });
     },
   });
 
-  const result = await client.ai({ prompt: "Return ok" }, { maxRetries: 1 });
-  assert.equal(result.output, "ok");
+  const result = await client.verify({ mode: "text", claim: "Return true" }, { maxRetries: 1 });
+  assert.equal(result.verdictId, "TRUE");
   assert.equal(attempt, 2);
   assert.equal(ids[0], ids[1]);
 });
@@ -93,11 +93,11 @@ test("409 is retried only for REQUEST_IN_PROGRESS", async () => {
     },
   });
 
-  await assert.rejects(client.search({ query: "example" }, { maxRetries: 3 }), FactLensError);
+  await assert.rejects(client.verify({ mode: "text", claim: "example" }, { maxRetries: 3 }), FactLensError);
   assert.equal(attempts, 1);
 });
 
-test("timeouts abort the transport and preserve the abort as the cause", async () => {
+test("timeouts abort verify and preserve the abort as the cause", async () => {
   const client = new FactLens({
     apiKey: "fl_live_project",
     fetch: async (_url, init) => new Promise((_resolve, reject) => {
@@ -106,52 +106,22 @@ test("timeouts abort the transport and preserve the abort as the cause", async (
   });
 
   await assert.rejects(
-    client.search({ query: "slow" }, { timeout: 5, maxRetries: 0 }),
+    client.verify({ mode: "text", claim: "slow" }, { timeout: 5, maxRetries: 0 }),
     (error) => error instanceof FactLensError && error.code === "REQUEST_TIMEOUT" && Boolean(error.cause),
   );
 });
 
-test("transcribe converts binary audio to the API JSON contract", async () => {
-  let body;
-  const client = new FactLens({
-    apiKey: "fl_live_project",
-    fetch: async (_url, init) => {
-      body = JSON.parse(init.body);
-      return Response.json({ request_id: "request", transcript: "Hi" });
-    },
-  });
-
-  const result = await client.transcribe({
-    audio: new Uint8Array([72, 105]),
-    contentType: "audio/webm",
-    language: "en",
-  });
-
-  assert.deepEqual(body, {
-    audio_base64: "SGk=",
-    content_type: "audio/webm",
-    language: "en",
-  });
-  assert.equal(result.transcript, "Hi");
-});
-
-test("runtime namespaces use the documented routes and preserve response bodies", async () => {
+test("runtime usage uses the documented GET route", async () => {
   const routes = [];
   const client = new FactLens({
     apiKey: "fl_live_project",
     fetch: async (url, init) => {
       routes.push({ url: new URL(url).pathname, method: init.method });
-      return Response.json({ ok: true });
+      return Response.json({ requests_used_total: 1 });
     },
   });
 
-  await client.search({ query: "example", count: 10 });
-  await client.ai({ prompt: "example", response_format: "json" });
-  await client.usage.get();
-
-  assert.deepEqual(routes, [
-    { url: "/v1/search", method: "POST" },
-    { url: "/v1/ai", method: "POST" },
-    { url: "/v1/usage", method: "GET" },
-  ]);
+  const usage = await client.usage.get();
+  assert.equal(usage.requests_used_total, 1);
+  assert.deepEqual(routes, [{ url: "/v1/usage", method: "GET" }]);
 });
