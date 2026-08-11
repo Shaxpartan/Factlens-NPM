@@ -13,9 +13,9 @@ await writeFile(
 );
 
 const helpCondition =
-  'if (!command || command === "--help" || command === "help" || flagBoolean(parsed.flags, "help")) {';
+  'if (!command || command === "help" || flagBoolean(parsed.flags, "help")) {';
 const versionSafeHelpCondition =
-  'if ((!command && !flagBoolean(parsed.flags, "version")) || command === "--help" || command === "help" || flagBoolean(parsed.flags, "help")) {';
+  'if ((!command && !flagBoolean(parsed.flags, "version")) || command === "help" || flagBoolean(parsed.flags, "help")) {';
 
 for (const target of ["../dist/esm/cli/index.js", "../dist/cjs/cli/index.js"]) {
   const cli = new URL(target, import.meta.url);
