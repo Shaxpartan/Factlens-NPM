@@ -331,16 +331,6 @@ try {
 }
 ```
 
-Verification-stage failures identify the stage without exposing managed provider credentials:
-
-| Error code | Stage |
-|---|---|
-| `VERIFICATION_TRANSCRIPTION_FAILED` | `transcription` |
-| `VERIFICATION_SEARCH_FAILED` | `search` |
-| `VERIFICATION_ANALYSIS_FAILED` | `analysis` |
-| `VERIFICATION_MODERATION_FAILED` | `moderation` |
-| `VERIFICATION_FAILED` | `verification` |
-
 Credential errors direct developers to `https://api.factlens.pro/dashboard` to create or copy the correct credential.
 
 The SDK retries network errors, `408`, `429`, retryable `5xx`, and `409 REQUEST_IN_PROGRESS` within the configured retry budget. It does not retry ordinary validation, authentication, quota, billing, ownership, or request-ID conflict errors.
@@ -352,26 +342,6 @@ See [Errors and retries](docs/errors-and-retries.md).
 FactLens credentials are secrets. The SDK refuses to initialize with secret credentials in a browser-like environment by default.
 
 `dangerouslyAllowBrowser: true` exists only as an explicit escape hatch for environments where you fully control the credential exposure. It should not be used with production secrets.
-
-## Direct Supabase testing
-
-Production defaults remain `https://api.factlens.pro`. For controlled backend testing, the SDK can route runtime and management calls independently:
-
-```ts
-const factlens = new FactLens({
-  runtimeBaseUrl: process.env.FACTLENS_RUNTIME_BASE_URL,
-  managementBaseUrl: process.env.FACTLENS_MANAGEMENT_BASE_URL,
-});
-```
-
-The CLI accepts the same test-only overrides through environment variables:
-
-```bash
-FACTLENS_RUNTIME_BASE_URL=...
-FACTLENS_MANAGEMENT_BASE_URL=...
-```
-
-Do not hard-code these overrides into production application code.
 
 ## Limits
 
@@ -388,16 +358,6 @@ Current developer-account limits are account-wide:
 Keys, logs, requests, and metrics remain project-attributed.
 
 See [Usage and limits](docs/usage-and-limits.md).
-
-## Package contents
-
-The npm package uses an explicit allowlist. Published artifacts contain the compiled `dist` output plus the package metadata/documentation files listed in `package.json`; source tests, repository workflows, local config, and development files are not part of the npm tarball.
-
-You can inspect the exact package contents before publishing:
-
-```bash
-npm pack --dry-run
-```
 
 ## Documentation
 
