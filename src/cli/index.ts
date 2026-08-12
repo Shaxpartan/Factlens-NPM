@@ -296,16 +296,28 @@ function outputSuccess(command: string, result: any, context: CliContext) {
   context.writeOut(`${JSON.stringify(result, null, 2)}\n`);
 }
 
+function appendHumanVerifyResult(lines: string[], result: any, index?: number) {
+  if (result?.claim) lines.push(index === undefined ? `Claim: ${result.claim}` : `Claim ${index + 1}: ${result.claim}`);
+  if (result?.verdictId) lines.push(`Verdict: ${result.verdictId}`);
+  if (result?.confidence) lines.push(`Confidence: ${result.confidence}`);
+  if (result?.evidenceStrength) lines.push(`Evidence: ${result.evidenceStrength}`);
+  if (result?.explanation) lines.push(`\n${result.explanation}`);
+  if (Array.isArray(result?.sources) && result.sources.length) {
+    lines.push("\nSources:");
+    result.sources.forEach((source: any, sourceIndex: number) => lines.push(`${sourceIndex + 1}. ${source.title ? `${source.title} — ` : ""}${source.url}`));
+  }
+}
+
 function humanVerify(result: VerifyResponse) {
   const lines = ["FactLens verification complete"];
-  if (result.claim) lines.push(`Claim: ${result.claim}`);
-  if (result.verdictId) lines.push(`Verdict: ${result.verdictId}`);
-  if (result.confidence) lines.push(`Confidence: ${result.confidence}`);
-  if (result.evidenceStrength) lines.push(`Evidence: ${result.evidenceStrength}`);
-  if (result.explanation) lines.push(`\n${result.explanation}`);
-  if (Array.isArray(result.sources) && result.sources.length) {
-    lines.push("\nSources:");
-    result.sources.forEach((source, index) => lines.push(`${index + 1}. ${source.title ? `${source.title} — ` : ""}${source.url}`));
+  const results = Array.isArray(result.results) && result.results.length ? result.results : null;
+  if (results) {
+    results.forEach((item, index) => {
+      if (index > 0) lines.push("");
+      appendHumanVerifyResult(lines, item, index);
+    });
+  } else {
+    appendHumanVerifyResult(lines, result);
   }
   if (result.request_id) lines.push(`\nRequest ID: ${result.request_id}`);
   if (result.response_time_ms !== undefined) lines.push(`Response time: ${result.response_time_ms} ms`);
@@ -316,7 +328,7 @@ function humanVerify(result: VerifyResponse) {
 async function mediaFile(path: string, kind: "image" | "audio") {
   const extension = extname(path).toLowerCase();
   const contentType = kind === "image" ? imageTypes[extension] : audioTypes[extension];
-  if (!contentType) throw usageError(`Unsupported ${kind} file type "${extension || "unknown"}".`);
+  if (!contentType) throw usageError(`Unsupported ${kind} file type "${extension || "unknown"}.`);
   const data = await readFile(path);
   const base64 = data.toString("base64");
   if (!data.length) throw usageError(`The ${kind} file is empty.`);
