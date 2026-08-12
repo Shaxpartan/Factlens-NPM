@@ -6,6 +6,8 @@ import type { RequestOptions } from "./types/index.js";
 export const SDK_VERSION = "1.0.0";
 export const FACTLENS_DASHBOARD_URL = "https://api.factlens.pro/dashboard";
 
+const RUNTIME_VERIFY_RECONNECT_WINDOW_MS = 23_000;
+
 type AuthKind = "runtime" | "management";
 
 type TransportConfig = {
@@ -72,18 +74,32 @@ export class HttpTransport {
     const deadline = Date.now() + timeout;
     const requestId = resolveRequestId(options.requestId, Boolean(request.automaticRequestId));
     const baseUrl = request.auth === "runtime" ? this.runtimeBaseUrl : this.managementBaseUrl;
+    const reconnectVerify = request.auth === "runtime"
+      && request.method === "POST"
+      && path === "/v1/verify"
+      && Boolean(requestId)
+      && isFactLensProxyRuntime(baseUrl);
     let attempt = 0;
 
     while (true) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw timeoutError(requestId);
 
+      const transportWindow = reconnectVerify
+        ? Math.min(remaining, RUNTIME_VERIFY_RECONNECT_WINDOW_MS)
+        : remaining;
+      const reconnectOnWindowExpiry = reconnectVerify && remaining > RUNTIME_VERIFY_RECONNECT_WINDOW_MS;
       const controller = new AbortController();
       const forwardAbort = () => controller.abort(options.signal?.reason);
       if (options.signal?.aborted) forwardAbort();
       else options.signal?.addEventListener("abort", forwardAbort, { once: true });
-      const timeoutReason = new DOMException("The FactLens request timed out.", "TimeoutError");
-      const timer = setTimeout(() => controller.abort(timeoutReason), remaining);
+      const timeoutReason = new DOMException(
+        reconnectOnWindowExpiry
+          ? "The FactLens transport reconnect window elapsed."
+          : "The FactLens request timed out.",
+        "TimeoutError",
+      );
+      const timer = setTimeout(() => controller.abort(timeoutReason), transportWindow);
 
       const headers = new Headers({
         Accept: "application/json",
@@ -103,8 +119,6 @@ export class HttpTransport {
           signal: controller.signal,
         });
       } catch (cause) {
-        clearTimeout(timer);
-        options.signal?.removeEventListener("abort", forwardAbort);
         if (options.signal?.aborted) {
           throw new FactLensError("The FactLens request was aborted.", {
             status: 0,
@@ -114,7 +128,10 @@ export class HttpTransport {
             cause: options.signal.reason ?? cause,
           });
         }
-        if (controller.signal.aborted) throw timeoutError(requestId, controller.signal.reason ?? cause);
+        if (controller.signal.aborted) {
+          if (reconnectOnWindowExpiry && Date.now() < deadline) continue;
+          throw timeoutError(requestId, controller.signal.reason ?? cause);
+        }
         if (attempt < maxRetries) {
           await delay(backoff(attempt));
           attempt += 1;
@@ -140,8 +157,17 @@ export class HttpTransport {
       const effectiveRequestId = textValue(errorBody.request_id)
         || response.headers.get("x-factlens-request-id")
         || requestId;
+
+      if (response.status === 409 && code === "REQUEST_IN_PROGRESS" && requestId) {
+        const wait = retryDelay(response.headers.get("retry-after"), 0);
+        const left = deadline - Date.now();
+        if (left <= 0) throw timeoutError(requestId);
+        await delay(Math.min(wait, left));
+        continue;
+      }
+
       const retryable = response.status === 409
-        ? code === "REQUEST_IN_PROGRESS"
+        ? false
         : isRetryableStatus(response.status);
 
       if (retryable && attempt < maxRetries) {
@@ -183,6 +209,14 @@ function normalizeBaseUrl(value: string) {
     throw new FactLensConfigurationError("FactLens API base URLs must be valid HTTP or HTTPS URLs.", { cause });
   }
   return result;
+}
+
+function isFactLensProxyRuntime(baseUrl: string) {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === "api.factlens.pro";
+  } catch {
+    return false;
+  }
 }
 
 function boundedInteger(value: number | undefined, fallback: number, minimum: number, maximum: number) {
@@ -230,7 +264,7 @@ function delay(milliseconds: number) {
 }
 
 function timeoutError(requestId?: string, cause?: unknown) {
-  return new FactLensError("The FactLens request timed out. Retry with a new request ID if the previous request did not complete.", {
+  return new FactLensError("The FactLens request timed out. Retry with the same request ID to retrieve its result if it completed upstream.", {
     status: 0,
     code: "REQUEST_TIMEOUT",
     requestId,
