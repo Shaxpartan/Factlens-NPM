@@ -3,7 +3,7 @@ import { FactLensConfigurationError, FactLensError, isRetryableStatus } from "./
 import type { VerificationStage } from "./errors.js";
 import type { RequestOptions } from "./types/index.js";
 
-export const SDK_VERSION = "1.0.0";
+export const SDK_VERSION = "1.0.7";
 export const FACTLENS_DASHBOARD_URL = "https://api.factlens.pro/dashboard";
 
 const RUNTIME_VERIFY_RECONNECT_WINDOW_MS = 23_000;
