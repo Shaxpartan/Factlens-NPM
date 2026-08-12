@@ -233,7 +233,7 @@ async function verifyCommand(client: FactLens, positionals: string[], flags: Fla
     if (claim.length > MAX_TEXT_CHARS) throw usageError(`Claim exceeds ${MAX_TEXT_CHARS.toLocaleString()} characters.`);
     input = { mode: "text", claim };
   }
-  return client.verify(input, requestOptions(flags, audio ? 180_000 : 60_000));
+  return client.verify(input, requestOptions(flags, 180_000));
 }
 
 async function projectsCommand(client: FactLens, args: string[], flags: Flags, saved: CliConfig, context: CliContext) {
