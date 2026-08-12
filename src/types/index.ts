@@ -58,15 +58,20 @@ export type VerifyInput = {
   instructions?: string;
 };
 
-export type VerifyResponse = RuntimeResponse & {
-  mode?: VerifyInput["mode"];
-  transcript?: string | null;
+export type VerifyResult = {
   claim?: string;
   verdictId?: string;
   explanation?: string;
   confidence?: "LOW" | "MEDIUM" | "HIGH";
   evidenceStrength?: "NONE" | "WEAK" | "MODERATE" | "STRONG";
   sources?: Array<{ url: string; title?: string; [key: string]: unknown }>;
+};
+
+export type VerifyResponse = RuntimeResponse & VerifyResult & {
+  mode?: VerifyInput["mode"];
+  transcript?: string | null;
+  claim_count?: number;
+  results?: VerifyResult[];
 };
 
 export type Account = {
