@@ -21,7 +21,7 @@ test("verify sends the project key, SDK metadata, JSON body, and one UUID reques
   assert.equal(request.init.method, "POST");
   assert.equal(headers.get("authorization"), "Bearer fl_live_project");
   assert.equal(headers.get("x-factlens-sdk"), "node");
-  assert.equal(headers.get("x-factlens-sdk-version"), "1.0.0");
+  assert.equal(headers.get("x-factlens-sdk-version"), "1.0.7");
   assert.match(headers.get("x-request-id"), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   assert.deepEqual(JSON.parse(request.init.body), { mode: "text", claim: "The sky is blue." });
   assert.equal(result.verdictId, "TRUE");
