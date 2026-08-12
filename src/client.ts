@@ -75,7 +75,7 @@ export default class FactLens {
       method: "POST",
       auth: "runtime",
       body: input,
-      timeout: 60_000,
+      timeout: 180_000,
       automaticRequestId: true,
       ...(options === undefined ? {} : { options }),
     });
