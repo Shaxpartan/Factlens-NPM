@@ -97,6 +97,35 @@ test("409 is retried only for REQUEST_IN_PROGRESS", async () => {
   assert.equal(attempts, 1);
 });
 
+test("REQUEST_IN_PROGRESS polling does not consume the normal retry budget and keeps one request ID", async () => {
+  const ids = [];
+  let attempts = 0;
+  const client = new FactLens({
+    apiKey: "fl_live_project",
+    fetch: async (_url, init) => {
+      attempts += 1;
+      const id = new Headers(init.headers).get("x-request-id");
+      ids.push(id);
+      if (attempts <= 3) {
+        return Response.json(
+          { error: "REQUEST_IN_PROGRESS", message: "Still running", request_id: id },
+          { status: 409, headers: { "Retry-After": "0", "X-FactLens-Request-ID": id } },
+        );
+      }
+      return Response.json({ request_id: id, verdictId: "TRUE" });
+    },
+  });
+
+  const result = await client.verify(
+    { mode: "text", claim: "A long verification." },
+    { maxRetries: 0, timeout: 5_000 },
+  );
+
+  assert.equal(result.verdictId, "TRUE");
+  assert.equal(attempts, 4);
+  assert.equal(new Set(ids).size, 1);
+});
+
 test("timeouts abort verify and preserve the abort as the cause", async () => {
   const client = new FactLens({
     apiKey: "fl_live_project",
