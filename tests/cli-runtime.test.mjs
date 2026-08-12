@@ -92,3 +92,45 @@ test('human Verify output contains result diagnostics without exposing transport
   const text = h.out.join('');
   for (const expected of ['Verdict: FALSE', 'Confidence: HIGH', 'Evidence: STRONG', 'Source', 'Request ID:', 'Response time: 900 ms', 'Usage:']) assert.match(text, new RegExp(expected));
 });
+
+test('human Verify output renders every multi-claim result and request metadata once', async () => {
+  const h = harness(async () => Response.json({
+    request_id: '01914f52-79f6-4d4f-b456-426614174001',
+    claim_count: 2,
+    claim: 'First claim',
+    verdictId: 'TRUE',
+    explanation: 'First explanation.',
+    confidence: 'HIGH',
+    evidenceStrength: 'STRONG',
+    sources: [{ title: 'First source', url: 'https://example.test/first' }],
+    results: [
+      {
+        claim: 'First claim',
+        verdictId: 'TRUE',
+        explanation: 'First explanation.',
+        confidence: 'HIGH',
+        evidenceStrength: 'STRONG',
+        sources: [{ title: 'First source', url: 'https://example.test/first' }],
+      },
+      {
+        claim: 'Second claim',
+        verdictId: 'FALSE',
+        explanation: 'Second explanation.',
+        confidence: 'MEDIUM',
+        evidenceStrength: 'MODERATE',
+        sources: [{ title: 'Second source', url: 'https://example.test/second' }],
+      },
+    ],
+    response_time_ms: 1200,
+    usage: { requests_charged: 1 },
+  }));
+
+  assert.equal(await runCli(['verify', 'Two claims'], h.deps), 0);
+  const text = h.out.join('');
+  for (const expected of ['Claim 1: First claim', 'Claim 2: Second claim', 'Verdict: TRUE', 'Verdict: FALSE', 'First source', 'Second source']) {
+    assert.match(text, new RegExp(expected));
+  }
+  assert.equal((text.match(/Request ID:/g) || []).length, 1);
+  assert.equal((text.match(/Response time:/g) || []).length, 1);
+  assert.equal((text.match(/Usage:/g) || []).length, 1);
+});
