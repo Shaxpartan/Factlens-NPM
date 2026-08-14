@@ -2,6 +2,11 @@
 
 All notable changes to this package are documented here.
 
+## Unreleased
+
+- Align SDK and CLI documentation with the FactLens API rate of 30 checks per $1 and 30 free checks per UTC day for eligible free accounts.
+- Clarify that existing unused paid balances are migrated by the API backend and are not converted locally by the SDK.
+
 ## 1.0.7 - 2026-08-12
 
 - Render every successful multi-claim result in human-readable CLI output while printing request metadata once.
