@@ -345,15 +345,17 @@ FactLens credentials are secrets. The SDK refuses to initialize with secret cred
 
 ## Limits
 
-Current developer-account limits are account-wide:
+Current developer-account limits are account-wide. Eligible free accounts receive 30 shared requests per UTC day. Paid API credits use the current rate: **$1 funds 30 API checks**.
 
 | | Free | Paid |
 |---|---:|---:|
 | Projects | 3 | 100 |
 | Active keys per project | 1 | 10 |
-| Daily free requests | 100 shared | 0 |
+| Daily free requests | 30 shared | 0 |
 | Throughput | 20/min shared | 60/min shared |
 | Purchased balance | — | Shared across all projects |
+
+Existing unused paid balances are migrated by the FactLens API backend to the current request-credit scale. The SDK reads the resulting account balance from the API and does not perform local conversion.
 
 Keys, logs, requests, and metrics remain project-attributed.
 
