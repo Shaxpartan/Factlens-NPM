@@ -195,9 +195,11 @@ async function tusUpload(options: {
 async function patchChunk(fetchImplementation: typeof globalThis.fetch, uploadUrl: string, token: string, chunk: Uint8Array, requestedOffset: number, total: number, requestId: string) {
   let offset = requestedOffset;
   for (let attempt = 0; attempt < TUS_RETRY_DELAYS.length; attempt += 1) {
-    if (TUS_RETRY_DELAYS[attempt] > 0) await delay(TUS_RETRY_DELAYS[attempt]);
+    const retryDelay = TUS_RETRY_DELAYS[attempt] ?? 0;
+    if (retryDelay > 0) await delay(retryDelay);
     let response: Response;
     try {
+      const payload = Uint8Array.from(chunk).buffer;
       response = await fetchImplementation(uploadUrl, {
         method: "PATCH",
         headers: {
@@ -206,7 +208,7 @@ async function patchChunk(fetchImplementation: typeof globalThis.fetch, uploadUr
           "Content-Type": "application/offset+octet-stream",
           "x-signature": token,
         },
-        body: chunk,
+        body: payload,
       });
     } catch (cause) {
       if (attempt === TUS_RETRY_DELAYS.length - 1) {
@@ -218,19 +220,15 @@ async function patchChunk(fetchImplementation: typeof globalThis.fetch, uploadUr
           cause,
         });
       }
-      offset = await tusOffset(fetchImplementation, uploadUrl, token, offset);
+      const recovered = await tusOffset(fetchImplementation, uploadUrl, token, offset);
+      if (recovered > requestedOffset) return recovered;
+      if (recovered < requestedOffset) throw protocolOffsetError(requestId);
+      offset = recovered;
       continue;
     }
     if (response.ok) {
       const next = Number(response.headers.get("upload-offset"));
-      if (!Number.isSafeInteger(next) || next <= offset || next > total) {
-        throw new FactLensError("FactLens storage returned an invalid resumable upload offset.", {
-          status: 502,
-          code: "AUDIO_UPLOAD_PROTOCOL_MISMATCH",
-          requestId,
-          retryable: true,
-        });
-      }
+      if (!Number.isSafeInteger(next) || next <= offset || next > total) throw protocolOffsetError(requestId);
       return next;
     }
     if (![408, 409, 423, 429].includes(response.status) && response.status < 500) {
@@ -241,9 +239,21 @@ async function patchChunk(fetchImplementation: typeof globalThis.fetch, uploadUr
       const body = await responseBody(response);
       throw responseError(response, body, requestId, "FactLens storage could not complete the resumable audio upload.", "AUDIO_UPLOAD_TUS_FAILED");
     }
-    offset = await tusOffset(fetchImplementation, uploadUrl, token, offset);
+    const recovered = await tusOffset(fetchImplementation, uploadUrl, token, offset);
+    if (recovered > requestedOffset) return recovered;
+    if (recovered < requestedOffset) throw protocolOffsetError(requestId);
+    offset = recovered;
   }
   return offset;
+}
+
+function protocolOffsetError(requestId: string) {
+  return new FactLensError("FactLens storage returned an invalid resumable upload offset.", {
+    status: 502,
+    code: "AUDIO_UPLOAD_PROTOCOL_MISMATCH",
+    requestId,
+    retryable: true,
+  });
 }
 
 async function tusOffset(fetchImplementation: typeof globalThis.fetch, uploadUrl: string, token: string, fallback: number) {
