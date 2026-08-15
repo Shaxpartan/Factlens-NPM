@@ -22,15 +22,26 @@ function harness(fetch, extra = {}) {
   };
 }
 
-test('audio CLI forwards --speaker and request scoped source preferences', async () => {
+test('audio CLI forwards --speaker and request scoped source preferences on the verification poll', async () => {
   const root = await mkdtemp(join(tmpdir(), 'factlens-speaker-'));
   try {
     const audio = join(root, 'clip.mp3');
     await writeFile(audio, Buffer.from([1, 2, 3, 4]));
-    let body;
-    const h = harness(async (_url, init) => {
-      body = JSON.parse(init.body);
-      return Response.json({ verdictId: 'TRUE', results: [], sources: [] });
+    let pollBody;
+    let uploadRequestId;
+    let pollRequestId;
+    const h = harness(async (url, init) => {
+      const headers = new Headers(init.headers);
+      if (String(url).includes('supabase.co/functions/v1/factlens-api')) {
+        uploadRequestId = headers.get('x-request-id');
+        return Response.json(
+          { error: 'REQUEST_IN_PROGRESS', message: 'Audio accepted.', stage: 'transcription', request_id: uploadRequestId },
+          { status: 409, headers: { 'Retry-After': '0' } },
+        );
+      }
+      pollRequestId = headers.get('x-request-id');
+      pollBody = JSON.parse(init.body);
+      return Response.json({ request_id: pollRequestId, verdictId: 'TRUE', results: [], sources: [] });
     }, { configFile: join(root, 'config.json') });
 
     assert.equal(await runCli([
@@ -41,10 +52,12 @@ test('audio CLI forwards --speaker and request scoped source preferences', async
       '--json',
     ], h.deps), 0);
 
-    assert.equal(body.mode, 'audio_video');
-    assert.equal(body.speaker, 'Jane Doe');
-    assert.deepEqual(body.trusted_domains, ['reuters.com', 'apnews.com']);
-    assert.deepEqual(body.blocked_domains, ['reddit.com']);
+    assert.equal(uploadRequestId, pollRequestId);
+    assert.equal(pollBody.mode, 'audio_video');
+    assert.equal(pollBody.audio_job, true);
+    assert.equal(pollBody.speaker, 'Jane Doe');
+    assert.deepEqual(pollBody.trusted_domains, ['reuters.com', 'apnews.com']);
+    assert.deepEqual(pollBody.blocked_domains, ['reddit.com']);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -60,6 +73,7 @@ test('human verify uses terminal color and emits an indeterminate progress bar w
 
     assert.equal(await runCli(['verify', 'Earth orbits the Sun.'], h.deps), 0);
     assert.match(h.err.join(''), /Verifying/i);
+    assert.match(h.err.join(''), /[●━·]/);
     assert.match(h.err.join(''), /\x1b\[/);
     assert.match(h.out.join(''), /\x1b\[/);
 
