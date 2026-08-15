@@ -54,7 +54,7 @@ The first 100,000 transcript characters use the normal one credit charge. Each a
 
 ## Source preferences
 
-Source preferences apply only to the current Verify request and are not saved to an account, project, API key, or CLI configuration. Trusted domains prioritize matching evidence. Blocked domains exclude matching evidence and take precedence if a domain appears in both lists.
+Trusted and blocked domains can be saved as defaults for an API key in the FactLens developer dashboard. When a Verify request omits a preference list, the API uses that key's saved list. Supplying `trusted_domains` or `blocked_domains` overrides the matching saved list for that request only. In the SDK, an explicit empty array overrides the saved list with no domains for that request. Trusted domains prioritize matching evidence. Blocked domains exclude matching evidence and take precedence if a domain appears in both lists.
 
 ```ts
 await factlens.verify({
@@ -70,6 +70,8 @@ CLI:
 ```bash
 factlens verify "Example claim" --trusted-domains reuters.com,apnews.com --blocked-domains example.com
 ```
+
+The CLI flags are request overrides and do not rewrite the API key defaults saved in the dashboard.
 
 Every Verify request receives one UUID `X-Request-ID` unless you provide one. Automatic retries and `REQUEST_IN_PROGRESS` polling within a single SDK call reuse that ID for idempotency.
 
