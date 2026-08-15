@@ -29,12 +29,15 @@ test('1.0.15 documents long media billing, speaker, progress, list and kill', ()
   for (const doc of [readme, runtimeDocs, usageDocs]) {
     assert.match(doc, /3 hours/i);
     assert.match(doc, /10 minutes/i);
-    assert.match(doc, /100,000 characters/i);
-    assert.match(doc, /30,000 characters/i);
+    assert.match(doc, /100,000(?: transcript)? characters/i);
+    assert.match(doc, /30,000(?: transcript)? characters/i);
   }
   assert.match(readme, /--speaker/);
   assert.match(readme, /factlens list/);
   assert.match(readme, /factlens kill/);
   assert.match(readme, /animated/i);
+  assert.match(readme, /not saved to your account, project, API key, or CLI configuration/i);
+  assert.doesNotMatch(readme, /saved default/i);
+  assert.doesNotMatch(runtimeDocs, /saved default/i);
   assert.match(changelog, /## 1\.0\.15/);
 });
