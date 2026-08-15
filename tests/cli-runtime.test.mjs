@@ -35,7 +35,7 @@ test('CLI verifies a text claim through /v1/verify and prints stable JSON', asyn
   assert.equal(h.err.length, 0);
 });
 
-test('CLI image stays inline while audio streams then polls the same request ID', async () => {
+test('CLI image stays inline while audio uses resumable storage then polls the same request ID', async () => {
   const root = await mkdtemp(join(tmpdir(), 'factlens-cli-media-'));
   try {
     const image = join(root, 'proof.jpg');
@@ -57,27 +57,45 @@ test('CLI image stays inline while audio streams then polls the same request ID'
     });
 
     const calls = [];
-    const audioHarness = harness(async (url, init) => {
+    const audioHarness = harness(async (url, init = {}) => {
+      const href = String(url);
       const headers = new Headers(init.headers);
-      calls.push({ url: String(url), headers, body: init.body });
-      if (String(url).includes('supabase.co/functions/v1/factlens-api')) {
-        return Response.json(
-          { error: 'REQUEST_IN_PROGRESS', message: 'Audio accepted.', stage: 'transcription', request_id: headers.get('x-request-id') },
-          { status: 409, headers: { 'Retry-After': '0' } },
-        );
+      const method = init.method || 'GET';
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : null;
+      calls.push({ url: href, headers, method, body });
+
+      if (href.includes('/functions/v1/factlens-audio-upload')) {
+        if (body?.action === 'prepare') return Response.json({ request_id: body.request_id, upload: { endpoint: 'https://test.storage.supabase.co/storage/v1/upload/resumable', token: 'signed-upload-token', bucket: 'factlens-api-audio-temp', object_path: `key/${body.request_id}-object`, chunk_size: 6 * 1024 * 1024 } });
+        if (body?.action === 'resolve') return Response.json({ request_id: body.request_id, audio_url: 'https://test.supabase.co/storage/v1/object/sign/factlens-api-audio-temp/object?token=read' });
+        if (body?.action === 'release' || body?.action === 'cleanup') return Response.json({ ok: true, request_id: body.request_id });
       }
-      const body = JSON.parse(init.body);
-      return Response.json({ request_id: headers.get('x-request-id'), verdictId: 'TRUE', results: [], sources: [], echo: body });
+      if (href === 'https://test.storage.supabase.co/storage/v1/upload/resumable' && method === 'POST') {
+        return new Response(null, { status: 201, headers: { Location: '/storage/v1/upload/resumable/session' } });
+      }
+      if (href.endsWith('/storage/v1/upload/resumable/session') && method === 'PATCH') {
+        return new Response(null, { status: 204, headers: { 'Upload-Offset': '4' } });
+      }
+      if (href === 'https://api.factlens.pro/v1/verify' && body?.audio_url) {
+        return Response.json({ error: 'REQUEST_IN_PROGRESS', message: 'Audio accepted.', stage: 'transcription', request_id: headers.get('x-request-id') }, { status: 409, headers: { 'Retry-After': '0' } });
+      }
+      if (href === 'https://api.factlens.pro/v1/verify' && body?.audio_job === true) {
+        return Response.json({ request_id: headers.get('x-request-id'), verdictId: 'TRUE', results: [], sources: [], echo: body });
+      }
+      return Response.json({ error: 'UNEXPECTED_TEST_REQUEST' }, { status: 500 });
     }, { configFile: join(root, 'audio-config.json') });
 
     assert.equal(await runCli(['verify', '--audio', audio, '--claim', 'The speaker makes this claim.', '--json'], audioHarness.deps), 0);
-    assert.equal(calls.length, 2);
-    const upload = calls[0];
-    const poll = calls[1];
-    assert.match(upload.url, /supabase\.co\/functions\/v1\/factlens-api\?endpoint=verify/);
-    assert.equal(upload.headers.get('content-type'), 'audio/mpeg');
-    assert.equal(upload.headers.get('x-request-id'), poll.headers.get('x-request-id'));
-    assert.deepEqual(JSON.parse(poll.body), {
+    const prepare = calls.find((call) => call.body?.action === 'prepare');
+    const tusCreate = calls.find((call) => call.url === 'https://test.storage.supabase.co/storage/v1/upload/resumable' && call.method === 'POST');
+    const tusPatch = calls.find((call) => call.method === 'PATCH');
+    const verifyStart = calls.find((call) => call.body?.audio_url);
+    const release = calls.find((call) => call.body?.action === 'release');
+    const poll = calls.find((call) => call.body?.audio_job === true);
+    assert.ok(prepare && tusCreate && tusPatch && verifyStart && release && poll);
+    assert.equal(tusPatch.headers.get('content-type'), 'application/offset+octet-stream');
+    assert.equal(prepare.headers.get('x-request-id'), poll.headers.get('x-request-id'));
+    assert.equal(verifyStart.headers.get('x-request-id'), poll.headers.get('x-request-id'));
+    assert.deepEqual(poll.body, {
       mode: 'audio_video',
       audio_job: true,
       claim: 'The speaker makes this claim.',
