@@ -25,7 +25,7 @@ test('1.0.15 keeps multi result rendering and request in progress recovery', () 
   assert.match(httpSource, /onProgress/);
 });
 
-test('1.0.15 documents long media billing, speaker, progress, list and kill', () => {
+test('1.0.15 documents long media billing, speaker, progress, list, kill, and source default overrides', () => {
   for (const doc of [readme, runtimeDocs, usageDocs]) {
     assert.match(doc, /3 hours/i);
     assert.match(doc, /10 minutes/i);
@@ -36,9 +36,11 @@ test('1.0.15 documents long media billing, speaker, progress, list and kill', ()
   assert.match(readme, /factlens list/);
   assert.match(readme, /factlens kill/);
   assert.match(readme, /animated/i);
-  assert.match(readme, /Source preferences apply only to the current verification request/i);
-  assert.match(readme, /Neither list is saved to your account, project, API key, or CLI configuration/i);
-  assert.doesNotMatch(readme, /saved default/i);
-  assert.doesNotMatch(runtimeDocs, /saved default/i);
+  assert.match(readme, /saved as defaults for each API key/i);
+  assert.match(readme, /overrides the matching saved list for that request only/i);
+  assert.match(readme, /explicit empty array/i);
+  assert.match(runtimeDocs, /saved as defaults for an API key/i);
+  assert.match(runtimeDocs, /overrides the matching saved list for that request only/i);
+  assert.match(runtimeDocs, /explicit empty array/i);
   assert.match(changelog, /## 1\.0\.15/);
 });
