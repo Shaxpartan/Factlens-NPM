@@ -21,7 +21,7 @@ test("verify sends the project key, SDK metadata, JSON body, and one UUID reques
   assert.equal(request.init.method, "POST");
   assert.equal(headers.get("authorization"), "Bearer fl_live_project");
   assert.equal(headers.get("x-factlens-sdk"), "node");
-  assert.equal(headers.get("x-factlens-sdk-version"), "1.0.11");
+  assert.equal(headers.get("x-factlens-sdk-version"), "1.0.15");
   assert.match(headers.get("x-request-id"), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   assert.deepEqual(JSON.parse(request.init.body), { mode: "text", claim: "The sky is blue." });
   assert.equal(result.verdictId, "TRUE");
@@ -51,6 +51,21 @@ test("verify forwards request scoped trusted and blocked domains unchanged", asy
     trusted_domains: ["reuters.com", "https://apnews.com/world"],
     blocked_domains: ["example.com", "bad.test"],
   });
+});
+
+test("verify forwards speaker and long audio URL fields", async () => {
+  let body;
+  const client = new FactLens({
+    apiKey: "fl_live_project",
+    baseUrl: "https://example.test/",
+    fetch: async (_url, init) => {
+      body = JSON.parse(init.body);
+      return Response.json({ verdictId: "TRUE", sources: [] });
+    },
+  });
+  await client.verify({ mode: "audio_video", audio_url: "https://example.com/interview.mp3", speaker: "Jane Doe" });
+  assert.equal(body.audio_url, "https://example.com/interview.mp3");
+  assert.equal(body.speaker, "Jane Doe");
 });
 
 test("verify retries reuse the request ID and respect retryable response classes", async () => {
@@ -125,6 +140,7 @@ test("409 is retried only for REQUEST_IN_PROGRESS", async () => {
 
 test("REQUEST_IN_PROGRESS polling does not consume the normal retry budget and keeps one request ID", async () => {
   const ids = [];
+  const progress = [];
   let attempts = 0;
   const client = new FactLens({
     apiKey: "fl_live_project",
@@ -134,7 +150,7 @@ test("REQUEST_IN_PROGRESS polling does not consume the normal retry budget and k
       ids.push(id);
       if (attempts <= 3) {
         return Response.json(
-          { error: "REQUEST_IN_PROGRESS", message: "Still running", request_id: id },
+          { error: "REQUEST_IN_PROGRESS", message: "Still running", stage: "transcription", request_id: id },
           { status: 409, headers: { "Retry-After": "0", "X-FactLens-Request-ID": id } },
         );
       }
@@ -144,12 +160,14 @@ test("REQUEST_IN_PROGRESS polling does not consume the normal retry budget and k
 
   const result = await client.verify(
     { mode: "text", claim: "A long verification." },
-    { maxRetries: 0, timeout: 5_000 },
+    { maxRetries: 0, timeout: 5_000, onProgress: (event) => progress.push(event.state) },
   );
 
   assert.equal(result.verdictId, "TRUE");
   assert.equal(attempts, 4);
   assert.equal(new Set(ids).size, 1);
+  assert.ok(progress.includes("transcribing"));
+  assert.equal(progress.at(-1), "complete");
 });
 
 test("timeouts abort verify and preserve the abort as the cause", async () => {
