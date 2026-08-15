@@ -21,3 +21,7 @@ const runtimeUsage = await factlens.usage.get();
 const accountUsage = await factlens.usage.getAccount();
 const oneProject = await factlens.usage.getAccount({ projectId });
 ```
+
+## Media request metering
+
+Uploaded or URL based audio is limited to 3 hours and costs one API credit per 10 minutes or part thereof. A direct transcript uses the normal one credit charge for its first 100,000 characters, then adds one credit for every additional 30,000 characters or part thereof. The final media cost is recorded on the same idempotent request, so retries with the same request ID do not charge the request again. Raw audio is not stored in the FactLens database.

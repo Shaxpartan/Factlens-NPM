@@ -259,7 +259,7 @@ await factlens.verify({
 
 ### Source preferences
 
-Source preferences apply only to the current verification request. Trusted domains are prioritized when they appear in evidence results. Blocked domains are excluded. Neither list is saved to your account, project, or CLI configuration.
+Trusted and blocked domains can be saved as defaults for an API key in the FactLens developer dashboard. If a verification request omits a list, the API uses that key’s saved default. Supplying `trusted_domains` or `blocked_domains` in the SDK or CLI overrides the matching saved list for that request only, including an explicit empty array. Trusted domains are prioritized when matching evidence is available. Blocked domains are excluded and take precedence.
 
 SDK:
 

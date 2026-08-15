@@ -37,6 +37,8 @@ await factlens.verify({
 });
 ```
 
+Audio verification is limited to 3 hours and costs one API credit per 10 minutes or part thereof. The CLI streams long local audio while the SDK can use `audio_url` for long form input. Raw audio is not stored in the FactLens database.
+
 If you already have a transcript:
 
 ```ts
@@ -47,9 +49,11 @@ await factlens.verify({
 });
 ```
 
+The first 100,000 transcript characters use the normal one credit charge. Each additional 30,000 characters or part thereof adds one credit.
+
 ## Source preferences
 
-Source preferences are request scoped and are never written to FactLens account, project, or CLI configuration. Use `trusted_domains` to prioritize matching evidence sources and `blocked_domains` to exclude matching domains. Blocked domains take precedence if the same domain appears in both arrays.
+Source preferences can be saved as defaults for an API key in the developer dashboard. If a request omits a list, the API uses that key’s saved default. Supplying `trusted_domains` or `blocked_domains` overrides the matching saved list for that request only, including an explicit empty array. Trusted domains prioritize matching evidence; blocked domains exclude matching evidence and take precedence.
 
 ```ts
 await factlens.verify({
