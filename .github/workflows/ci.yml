@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, V50.0.0]
+    branches: [main, V50.0.0, agent/cli-progress-speaker-20260815]
   pull_request:
 
 permissions:
