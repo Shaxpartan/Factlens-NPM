@@ -1,0 +1,30 @@
+name: Apply CLI help update
+
+on:
+  push:
+    branches:
+      - agent/cli-progress-speaker-20260815
+    paths:
+      - scripts/fix-cli-help.mjs
+      - .github/workflows/fix-cli-help.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/cli-progress-speaker-20260815
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/fix-cli-help.mjs
+      - run: |
+          git config user.name "FactLens Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/cli/index.ts
+          git commit -m "docs: expose CLI jobs and speaker help"
+          git push origin HEAD:agent/cli-progress-speaker-20260815
