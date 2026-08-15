@@ -259,7 +259,7 @@ await factlens.verify({
 
 ### Source preferences
 
-Trusted and blocked domains can be saved as defaults for an API key in the FactLens developer dashboard. If a verification request omits a list, the API uses that key’s saved default. Supplying `trusted_domains` or `blocked_domains` in the SDK or CLI overrides the matching saved list for that request only, including an explicit empty array. Trusted domains are prioritized when matching evidence is available. Blocked domains are excluded and take precedence.
+Source preferences apply only to the current verification request. Trusted domains are prioritized when matching evidence is available. Blocked domains are excluded and take precedence if a domain appears in both lists. Neither list is saved to your account, project, API key, or CLI configuration.
 
 SDK:
 
@@ -312,7 +312,7 @@ await staging.verify({ mode: "text", claim: "..." });
 
 ## Request control
 
-SDK requests support timeout, cancellation, request IDs, and bounded retries:
+SDK requests support timeout, cancellation, request IDs, bounded retries, and progress callbacks:
 
 ```ts
 import { randomUUID } from "node:crypto";
@@ -326,11 +326,14 @@ await factlens.verify(
     timeout: 90_000,
     requestId: randomUUID(),
     maxRetries: 2,
+    onProgress(progress) {
+      console.log(progress.state, progress.elapsedMs);
+    },
   },
 );
 ```
 
-Verify automatically receives an `X-Request-ID` when you do not provide one. Automatic retries within one invocation reuse that request ID so an in-progress or completed idempotent request is not executed twice.
+Verify automatically receives an `X-Request-ID` when you do not provide one. Automatic retries and `REQUEST_IN_PROGRESS` polling within one invocation reuse that request ID so an in-progress or completed idempotent request is not executed twice.
 
 ## Errors
 
@@ -356,7 +359,7 @@ try {
 
 Credential errors direct developers to `https://api.factlens.pro/dashboard` to create or copy the correct credential.
 
-The SDK retries network errors, `408`, `429`, retryable `5xx`, and `409 REQUEST_IN_PROGRESS` within the configured retry budget. It does not retry ordinary validation, authentication, quota, billing, ownership, or request-ID conflict errors.
+`409 REQUEST_IN_PROGRESS` is not surfaced as a terminal error while the configured request timeout remains. The SDK keeps the same request ID, follows the server's `Retry-After` guidance, and continues polling. Ordinary validation, authentication, quota, billing, ownership, and request-ID conflict errors are not retried. Retryable network errors, `408`, `429`, and retryable `5xx` responses use the bounded retry budget.
 
 See [Errors and retries](docs/errors-and-retries.md).
 
@@ -377,6 +380,8 @@ Current developer-account limits are account-wide. Eligible free accounts receiv
 | Daily free requests | 30 shared | 0 |
 | Throughput | 20/min shared | 60/min shared |
 | Purchased balance | — | Shared across all projects |
+
+Media verification is metered by the request. Audio is limited to 3 hours and costs one API credit per 10 minutes or part thereof. Direct transcript input includes the first 100,000 characters in the normal one credit charge, then adds one credit for each additional 30,000 characters or part thereof.
 
 Existing unused paid balances are migrated by the FactLens API backend to the current request-credit scale. The SDK reads the resulting account balance from the API and does not perform local conversion.
 
