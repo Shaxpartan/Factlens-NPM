@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, V50.0.0, agent/source-preferences-20260815]
+    branches: [main, V50.0.0]
   pull_request:
 
 permissions:
