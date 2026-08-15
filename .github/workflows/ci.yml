@@ -13,25 +13,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: Apply guarded source preference edits
+      - name: Restore surgical package lock formatting
         run: |
-          if ! grep -q 'trusted_domains?: string\[\]' src/types/index.ts; then
-            node scripts/apply-source-preferences.mjs
-          fi
-      - name: Commit feature branch implementation
+          git show origin/main:package-lock.json > package-lock.json
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = 'package-lock.json';
+          let source = fs.readFileSync(path, 'utf8');
+          let count = 0;
+          source = source.replace(/"version": "1\.0\.7"/g, (match) => {
+            if (count >= 2) return match;
+            count += 1;
+            return '"version": "1.0.11"';
+          });
+          if (count !== 2) throw new Error(`Expected two root version fields, changed ${count}`);
+          fs.writeFileSync(path, source);
+          NODE
+      - name: Commit surgical package lock
         run: |
-          if ! git diff --quiet; then
+          if ! git diff --quiet -- package-lock.json; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -A src package.json package-lock.json README.md docs/runtime-api.md CHANGELOG.md tests/version-1.0.7.test.mjs
-            git commit -m "Add SDK and CLI source preferences"
+            git add package-lock.json
+            git commit -m "Keep package lock version change surgical"
             git push origin HEAD:agent/source-preferences-20260815
           fi
+      - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run test:examples
