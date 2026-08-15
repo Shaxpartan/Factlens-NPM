@@ -16,7 +16,7 @@ test('1.0.15 release metadata and runtime SDK header stay synchronized', () => {
 
 test('1.0.15 keeps multi result rendering and request in progress recovery', () => {
   assert.match(cliSource, /Array\.isArray\(result\.results\)/);
-  assert.match(cliSource, /appendHumanVerifyResult\(lines, item, index\)/);
+  assert.match(cliSource, /appendHumanVerifyResult\(lines, item, index, color\)/);
   assert.match(httpSource, /REQUEST_IN_PROGRESS/);
   assert.match(httpSource, /onProgress/);
 });
