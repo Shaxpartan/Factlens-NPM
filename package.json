@@ -1,6 +1,6 @@
 {
   "name": "factlens",
-  "version": "1.0.11",
+  "version": "1.0.15",
   "description": "Official Node.js, TypeScript SDK, and CLI for the FactLens verification API",
   "type": "commonjs",
   "main": "./dist/cjs/index.js",

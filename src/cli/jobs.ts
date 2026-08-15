@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-export type CliJobState = "preparing" | "verifying" | "waiting" | "retrying";
+export type CliJobState = "preparing" | "uploading" | "transcribing" | "verifying" | "waiting" | "retrying";
 export type CliJob = {
   id: string;
   requestId: string;
@@ -80,7 +80,7 @@ async function readJob(root: string, id: string): Promise<CliJob | null> {
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     if (typeof value.id !== "string" || typeof value.requestId !== "string" || !Number.isInteger(value.pid) || !Number.isFinite(value.startedAt)) return null;
     if (!["text", "audio_video", "image_post"].includes(value.mode)) return null;
-    if (!["preparing", "verifying", "waiting", "retrying"].includes(value.state)) return null;
+    if (!["preparing", "uploading", "transcribing", "verifying", "waiting", "retrying"].includes(value.state)) return null;
     return value as CliJob;
   } catch (error: any) {
     if (error?.code === "ENOENT" || error instanceof SyntaxError) return null;

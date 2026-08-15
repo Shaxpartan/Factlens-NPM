@@ -113,10 +113,12 @@ Supported image inputs are PNG, JPEG, WebP, and GIF.
 
 ```bash
 factlens verify --audio interview.mp3
-factlens verify --audio clip.m4a --claim "The speaker says inflation is 3%."
+factlens verify --audio clip.m4a --speaker "Jane Doe"
+factlens list
+factlens kill REQUEST_ID
 ```
 
-The CLI sends the media to **Verify**. FactLens transcribes it internally when required; there is no standalone transcription command.
+The CLI streams local audio into **Verify** and shows an animated progress bar while it runs. `factlens list` shows active local jobs and concurrency, and `factlens kill <request-id>` or `factlens kill all` stops them. FactLens transcribes media internally; there is no standalone transcription command. Audio is limited to 3 hours and costs one API credit per 10 minutes or part thereof.
 
 ### Verify a text file
 
@@ -237,15 +239,15 @@ const result = await factlens.verify({
 ```ts
 const result = await factlens.verify({
   mode: "audio_video",
-  audio_base64: audioBase64,
-  content_type: "audio/mpeg",
+  audio_url: "https://example.com/interview.mp3",
+  speaker: "Jane Doe",
 });
 
 console.log(result.transcript);
 console.log(result.verdictId);
 ```
 
-If you already have a transcript, send it through Verify instead of uploading audio:
+For long form SDK requests, use `audio_url`. Inline `audio_base64` remains available for smaller media. If you already have a transcript, send it through Verify instead of uploading audio. The first 100,000 transcript characters use the normal one credit charge; each additional 30,000 characters or part thereof adds one credit:
 
 ```ts
 await factlens.verify({
