@@ -113,10 +113,12 @@ Supported image inputs are PNG, JPEG, WebP, and GIF.
 
 ```bash
 factlens verify --audio interview.mp3
-factlens verify --audio clip.m4a --claim "The speaker says inflation is 3%."
+factlens verify --audio clip.m4a --speaker "Jane Doe"
+factlens list
+factlens kill REQUEST_ID
 ```
 
-The CLI sends the media to **Verify**. FactLens transcribes it internally when required; there is no standalone transcription command.
+The CLI streams local audio into **Verify** and shows an animated progress bar while it runs. `factlens list` shows active local jobs and concurrency, and `factlens kill <request-id>` or `factlens kill all` stops them. FactLens transcribes media internally; there is no standalone transcription command. Audio is limited to 3 hours and costs one API credit per 10 minutes or part thereof.
 
 ### Verify a text file
 
@@ -237,15 +239,15 @@ const result = await factlens.verify({
 ```ts
 const result = await factlens.verify({
   mode: "audio_video",
-  audio_base64: audioBase64,
-  content_type: "audio/mpeg",
+  audio_url: "https://example.com/interview.mp3",
+  speaker: "Jane Doe",
 });
 
 console.log(result.transcript);
 console.log(result.verdictId);
 ```
 
-If you already have a transcript, send it through Verify instead of uploading audio:
+For long form SDK requests, use `audio_url`. Inline `audio_base64` remains available for smaller media. If you already have a transcript, send it through Verify instead of uploading audio. The first 100,000 transcript characters use the normal one credit charge; each additional 30,000 characters or part thereof adds one credit:
 
 ```ts
 await factlens.verify({
@@ -257,7 +259,7 @@ await factlens.verify({
 
 ### Source preferences
 
-Source preferences apply only to the current verification request. Trusted domains are prioritized when they appear in evidence results. Blocked domains are excluded. Neither list is saved to your account, project, or CLI configuration.
+Source preferences apply only to the current verification request. Trusted domains are prioritized when matching evidence is available. Blocked domains are excluded and take precedence if a domain appears in both lists. Neither list is saved to your account, project, API key, or CLI configuration.
 
 SDK:
 
@@ -310,7 +312,7 @@ await staging.verify({ mode: "text", claim: "..." });
 
 ## Request control
 
-SDK requests support timeout, cancellation, request IDs, and bounded retries:
+SDK requests support timeout, cancellation, request IDs, bounded retries, and progress callbacks:
 
 ```ts
 import { randomUUID } from "node:crypto";
@@ -324,11 +326,14 @@ await factlens.verify(
     timeout: 90_000,
     requestId: randomUUID(),
     maxRetries: 2,
+    onProgress(progress) {
+      console.log(progress.state, progress.elapsedMs);
+    },
   },
 );
 ```
 
-Verify automatically receives an `X-Request-ID` when you do not provide one. Automatic retries within one invocation reuse that request ID so an in-progress or completed idempotent request is not executed twice.
+Verify automatically receives an `X-Request-ID` when you do not provide one. Automatic retries and `REQUEST_IN_PROGRESS` polling within one invocation reuse that request ID so an in-progress or completed idempotent request is not executed twice.
 
 ## Errors
 
@@ -354,7 +359,7 @@ try {
 
 Credential errors direct developers to `https://api.factlens.pro/dashboard` to create or copy the correct credential.
 
-The SDK retries network errors, `408`, `429`, retryable `5xx`, and `409 REQUEST_IN_PROGRESS` within the configured retry budget. It does not retry ordinary validation, authentication, quota, billing, ownership, or request-ID conflict errors.
+`409 REQUEST_IN_PROGRESS` is not surfaced as a terminal error while the configured request timeout remains. The SDK keeps the same request ID, follows the server's `Retry-After` guidance, and continues polling. Ordinary validation, authentication, quota, billing, ownership, and request-ID conflict errors are not retried. Retryable network errors, `408`, `429`, and retryable `5xx` responses use the bounded retry budget.
 
 See [Errors and retries](docs/errors-and-retries.md).
 
@@ -375,6 +380,8 @@ Current developer-account limits are account-wide. Eligible free accounts receiv
 | Daily free requests | 30 shared | 0 |
 | Throughput | 20/min shared | 60/min shared |
 | Purchased balance | — | Shared across all projects |
+
+Media verification is metered by the request. Audio is limited to 3 hours and costs one API credit per 10 minutes or part thereof. Direct transcript input includes the first 100,000 characters in the normal one credit charge, then adds one credit for each additional 30,000 characters or part thereof.
 
 Existing unused paid balances are migrated by the FactLens API backend to the current request-credit scale. The SDK reads the resulting account balance from the API and does not perform local conversion.
 

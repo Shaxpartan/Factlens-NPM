@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { runCli } from '../dist/esm/cli/index.js';
 
-function harness(fetch) {
+function harness(fetch, overrides = {}) {
   const out = [];
   const err = [];
   return {
@@ -17,6 +17,7 @@ function harness(fetch) {
       fetch,
       writeOut: (value) => out.push(String(value)),
       writeErr: (value) => err.push(String(value)),
+      ...overrides,
     },
   };
 }
@@ -34,32 +35,51 @@ test('CLI verifies a text claim through /v1/verify and prints stable JSON', asyn
   assert.equal(h.err.length, 0);
 });
 
-test('CLI image and audio modes preserve media MIME and base64 content', async () => {
+test('CLI image stays inline while audio streams then polls the same request ID', async () => {
   const root = await mkdtemp(join(tmpdir(), 'factlens-cli-media-'));
   try {
     const image = join(root, 'proof.jpg');
     const audio = join(root, 'clip.mp3');
     await writeFile(image, Buffer.from([1, 2, 3, 4]));
     await writeFile(audio, Buffer.from([5, 6, 7, 8]));
-    const bodies = [];
-    const h = harness(async (_url, init) => {
-      bodies.push(JSON.parse(init.body));
+
+    let imageBody;
+    const imageHarness = harness(async (_url, init) => {
+      imageBody = JSON.parse(init.body);
       return Response.json({ verdictId: 'UNVERIFIED', sources: [] });
-    });
-
-    assert.equal(await runCli(['verify', '--image', image, '--claim', 'This is authentic.', '--json'], h.deps), 0);
-    assert.equal(await runCli(['verify', '--audio', audio, '--claim', 'The speaker makes this claim.', '--json'], h.deps), 0);
-
-    assert.deepEqual(bodies[0], {
+    }, { configFile: join(root, 'image-config.json') });
+    assert.equal(await runCli(['verify', '--image', image, '--claim', 'This is authentic.', '--json'], imageHarness.deps), 0);
+    assert.deepEqual(imageBody, {
       mode: 'image_post',
       claim: 'This is authentic.',
       image_base64: Buffer.from([1, 2, 3, 4]).toString('base64'),
       content_type: 'image/jpeg',
     });
-    assert.deepEqual(bodies[1], {
+
+    const calls = [];
+    const audioHarness = harness(async (url, init) => {
+      const headers = new Headers(init.headers);
+      calls.push({ url: String(url), headers, body: init.body });
+      if (String(url).includes('supabase.co/functions/v1/factlens-api')) {
+        return Response.json(
+          { error: 'REQUEST_IN_PROGRESS', message: 'Audio accepted.', stage: 'transcription', request_id: headers.get('x-request-id') },
+          { status: 409, headers: { 'Retry-After': '0' } },
+        );
+      }
+      const body = JSON.parse(init.body);
+      return Response.json({ request_id: headers.get('x-request-id'), verdictId: 'TRUE', results: [], sources: [], echo: body });
+    }, { configFile: join(root, 'audio-config.json') });
+
+    assert.equal(await runCli(['verify', '--audio', audio, '--claim', 'The speaker makes this claim.', '--json'], audioHarness.deps), 0);
+    assert.equal(calls.length, 2);
+    const upload = calls[0];
+    const poll = calls[1];
+    assert.match(upload.url, /supabase\.co\/functions\/v1\/factlens-api\?endpoint=verify/);
+    assert.equal(upload.headers.get('content-type'), 'audio/mpeg');
+    assert.equal(upload.headers.get('x-request-id'), poll.headers.get('x-request-id'));
+    assert.deepEqual(JSON.parse(poll.body), {
       mode: 'audio_video',
-      audio_base64: Buffer.from([5, 6, 7, 8]).toString('base64'),
-      content_type: 'audio/mpeg',
+      audio_job: true,
       claim: 'The speaker makes this claim.',
     });
   } finally {
@@ -104,22 +124,8 @@ test('human Verify output renders every multi-claim result and request metadata 
     evidenceStrength: 'STRONG',
     sources: [{ title: 'First source', url: 'https://example.test/first' }],
     results: [
-      {
-        claim: 'First claim',
-        verdictId: 'TRUE',
-        explanation: 'First explanation.',
-        confidence: 'HIGH',
-        evidenceStrength: 'STRONG',
-        sources: [{ title: 'First source', url: 'https://example.test/first' }],
-      },
-      {
-        claim: 'Second claim',
-        verdictId: 'FALSE',
-        explanation: 'Second explanation.',
-        confidence: 'MEDIUM',
-        evidenceStrength: 'MODERATE',
-        sources: [{ title: 'Second source', url: 'https://example.test/second' }],
-      },
+      { claim: 'First claim', verdictId: 'TRUE', explanation: 'First explanation.', confidence: 'HIGH', evidenceStrength: 'STRONG', sources: [{ title: 'First source', url: 'https://example.test/first' }] },
+      { claim: 'Second claim', verdictId: 'FALSE', explanation: 'Second explanation.', confidence: 'MEDIUM', evidenceStrength: 'MODERATE', sources: [{ title: 'Second source', url: 'https://example.test/second' }] },
     ],
     response_time_ms: 1200,
     usage: { requests_charged: 1 },
@@ -127,9 +133,7 @@ test('human Verify output renders every multi-claim result and request metadata 
 
   assert.equal(await runCli(['verify', 'Two claims'], h.deps), 0);
   const text = h.out.join('');
-  for (const expected of ['Claim 1: First claim', 'Claim 2: Second claim', 'Verdict: TRUE', 'Verdict: FALSE', 'First source', 'Second source']) {
-    assert.match(text, new RegExp(expected));
-  }
+  for (const expected of ['Claim 1: First claim', 'Claim 2: Second claim', 'Verdict: TRUE', 'Verdict: FALSE', 'First source', 'Second source']) assert.match(text, new RegExp(expected));
   assert.equal((text.match(/Request ID:/g) || []).length, 1);
   assert.equal((text.match(/Response time:/g) || []).length, 1);
   assert.equal((text.match(/Usage:/g) || []).length, 1);

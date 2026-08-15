@@ -71,11 +71,12 @@ export default class FactLens {
   }
 
   verify(input: VerifyInput, options?: RequestOptions) {
+    const longFormAudio = input.mode === "audio_video" && Boolean(input.audio_url);
     return this.transport.request<VerifyResponse>("/v1/verify", {
       method: "POST",
       auth: "runtime",
       body: input,
-      timeout: 180_000,
+      timeout: longFormAudio ? 1_800_000 : 180_000,
       automaticRequestId: true,
       ...(options === undefined ? {} : { options }),
     });

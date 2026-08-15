@@ -8,11 +8,21 @@ export type FactLensClientOptions = {
   fetch?: typeof globalThis.fetch;
 };
 
+export type VerifyProgressState = "sending" | "waiting" | "transcribing" | "retrying" | "complete";
+
+export type VerifyProgress = {
+  state: VerifyProgressState;
+  elapsedMs: number;
+  requestId?: string;
+  attempt: number;
+};
+
 export type RequestOptions = {
   signal?: AbortSignal;
   timeout?: number;
   requestId?: string;
   maxRetries?: number;
+  onProgress?: (progress: VerifyProgress) => void;
 };
 
 export type UsageSnapshot = {
@@ -48,7 +58,9 @@ export type VerifyInput = {
   text?: string;
   texts?: string[];
   transcript?: string;
+  speaker?: string;
   audio_base64?: string;
+  audio_url?: string;
   image_base64?: string;
   content_type?: string;
   language?: string;

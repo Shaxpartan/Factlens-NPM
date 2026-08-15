@@ -1,8 +1,12 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { basename, extname } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import FactLens from "../client.js";
 import { FactLensConfigurationError } from "../errors.js";
+import { startAudioUpload } from "./audio.js";
+import { killJobs, listJobs, registerJob, removeJob, updateJob, type CliJobState } from "./jobs.js";
+import { colorize, createProgress, formatElapsed } from "./terminal.js";
 import { SDK_VERSION } from "../http.js";
 import type { LogListOptions, RequestOptions, VerifyInput, VerifyResponse } from "../types/index.js";
 import { clearConfig, configPath, loadConfig, maskSecret, resolveCredentials, saveConfig, type CliConfig } from "./config.js";
@@ -20,6 +24,11 @@ export type CliDependencies = {
   writeErr?: Writer;
   stdin?: NodeJS.ReadStream;
   stdout?: NodeJS.WriteStream;
+  jobsDir?: string;
+  color?: boolean;
+  progressIntervalMs?: number;
+  pid?: number;
+  audioUploadUrl?: string;
 };
 
 type Flags = Map<string, string | boolean>;
@@ -33,19 +42,32 @@ type CliContext = {
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WriteStream;
   json: boolean;
+  jobsDir: string;
+  color: boolean;
+  progressIntervalMs: number;
+  pid: number;
+  audioUploadUrl?: string;
 };
 
 export async function runCli(argv: string[], dependencies: CliDependencies = {}): Promise<number> {
   const parsed = parseArgs(argv);
+  const env = dependencies.env ?? process.env;
+  const configFile = dependencies.configFile ?? configPath({ env });
+  const stdout = dependencies.stdout ?? process.stdout;
   const context: CliContext = {
-    env: dependencies.env ?? process.env,
+    env,
     ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
-    configFile: dependencies.configFile ?? configPath({ env: dependencies.env ?? process.env }),
+    configFile,
     writeOut: dependencies.writeOut ?? ((value) => process.stdout.write(value)),
     writeErr: dependencies.writeErr ?? ((value) => process.stderr.write(value)),
     stdin: dependencies.stdin ?? process.stdin,
-    stdout: dependencies.stdout ?? process.stdout,
+    stdout,
     json: flagBoolean(parsed.flags, "json"),
+    jobsDir: dependencies.jobsDir ?? join(dirname(configFile), "jobs"),
+    color: dependencies.color ?? Boolean(stdout.isTTY && !("NO_COLOR" in env)),
+    progressIntervalMs: dependencies.progressIntervalMs ?? 120,
+    pid: dependencies.pid ?? process.pid,
+    ...(dependencies.audioUploadUrl ? { audioUploadUrl: dependencies.audioUploadUrl } : {}),
   };
 
   try {
@@ -61,6 +83,8 @@ export async function runCli(argv: string[], dependencies: CliDependencies = {})
 
     if (command === "configure") return configureCommand(parsed.flags, context);
     if (command === "config") return configCommand(parsed.positionals.slice(1), context);
+    if (command === "list") return listCommand(context);
+    if (command === "kill") return killCommand(parsed.positionals.slice(1), context);
 
     const saved = await loadConfig(context.configFile);
     const resolvedConfig = resolveCredentials(saved, context.env);
@@ -73,7 +97,7 @@ export async function runCli(argv: string[], dependencies: CliDependencies = {})
         result = await doctor(client, resolvedConfig);
         break;
       case "verify":
-        result = await verifyCommand(client, parsed.positionals.slice(1), parsed.flags);
+        result = await verifyCommand(client, parsed.positionals.slice(1), parsed.flags, context, resolvedConfig);
         break;
       case "usage":
         result = flagBoolean(parsed.flags, "account")
@@ -118,7 +142,7 @@ export async function runCli(argv: string[], dependencies: CliDependencies = {})
     return 0;
   } catch (error) {
     if (context.json) writeJson(context.writeErr, { ok: false, error: serializeError(error) });
-    else context.writeErr(humanError(error));
+    else context.writeErr(colorize(humanError(error), 31, context.color));
     return exitCodeFor(error);
   }
 }
@@ -207,35 +231,119 @@ async function doctor(client: FactLens, config: ReturnType<typeof resolveCredent
   return { ok: checks.some((check) => check.ok === true) && checks.every((check) => check.ok === true || check.message), checks };
 }
 
-async function verifyCommand(client: FactLens, positionals: string[], flags: Flags): Promise<VerifyResponse> {
+async function verifyCommand(client: FactLens, positionals: string[], flags: Flags, context: CliContext, resolvedConfig: ReturnType<typeof resolveCredentials>): Promise<VerifyResponse> {
   const file = flagString(flags, "file");
   const image = flagString(flags, "image");
   const audio = flagString(flags, "audio");
   const explicitInputs = [file, image, audio].filter(Boolean);
   if (explicitInputs.length > 1) throw usageError("Use only one of --file, --image, or --audio for a verification request.");
 
+  const trustedDomains = domainListFlag(flags, "trusted-domains");
+  const blockedDomains = domainListFlag(flags, "blocked-domains");
+  const speaker = clean(flagString(flags, "speaker"));
+  const requestId = flagString(flags, "request-id") || randomUUID();
+  const common = { ...(trustedDomains.length ? { trusted_domains: trustedDomains } : {}), ...(blockedDomains.length ? { blocked_domains: blockedDomains } : {}) };
+
   let input: VerifyInput;
+  let mode: VerifyInput["mode"];
   if (file) {
     const text = (await readFile(file, "utf8")).trim();
     if (!text) throw usageError("The text file is empty.");
     if (text.length > MAX_TEXT_CHARS) throw usageError(`Text input exceeds ${MAX_TEXT_CHARS.toLocaleString()} characters.`);
-    input = { mode: "text", claim: text };
+    mode = "text";
+    input = { mode, claim: text, ...common };
   } else if (image) {
     const claim = requiredText(flagString(flags, "claim") || positionals.join(" "), "claim");
     const media = await mediaFile(image, "image");
-    input = { mode: "image_post", claim, image_base64: media.base64, content_type: media.contentType };
+    mode = "image_post";
+    input = { mode, claim, image_base64: media.base64, content_type: media.contentType, ...common };
   } else if (audio) {
-    const media = await mediaFile(audio, "audio");
+    const contentType = audioContentType(audio);
     const claim = clean(flagString(flags, "claim") || positionals.join(" "));
-    input = { mode: "audio_video", audio_base64: media.base64, content_type: media.contentType, ...(claim ? { claim } : {}) };
+    if (!resolvedConfig.apiKey) throw new FactLensConfigurationError(`A FactLens project API key is required. Get one from ${DASHBOARD}.`);
+    mode = "audio_video";
+    await registerJob(context.jobsDir, { id: requestId, requestId, pid: context.pid, mode, state: "uploading", startedAt: Date.now(), ...(speaker ? { speaker } : {}) });
+    const progress = createProgress(context.writeErr, !context.json, context.color, context.progressIntervalMs);
+    progress.start("Uploading audio");
+    try {
+      await startAudioUpload({ path: audio, contentType, apiKey: resolvedConfig.apiKey, requestId, language: flagString(flags, "language") || "auto", runtimeBaseUrl: resolvedConfig.runtimeBaseUrl, audioUploadUrl: context.audioUploadUrl || context.env.FACTLENS_AUDIO_UPLOAD_URL, fetch: context.fetch });
+      await updateJob(context.jobsDir, requestId, { state: "transcribing" });
+      progress.update("Transcribing audio");
+      const pollInput = { mode, audio_job: true, ...(claim ? { claim } : {}), ...(speaker ? { speaker } : {}), ...common } as VerifyInput & { audio_job: true };
+      return await client.verify(pollInput, { ...requestOptions(flags, 1_800_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); void updateJob(context.jobsDir, requestId, { state: mapped }); progress.update(progressLabel(event.state)); } });
+    } finally {
+      progress.stop();
+      await removeJob(context.jobsDir, requestId);
+    }
   } else {
     const claim = requiredText(flagString(flags, "claim") || positionals.join(" "), "claim");
     if (claim.length > MAX_TEXT_CHARS) throw usageError(`Claim exceeds ${MAX_TEXT_CHARS.toLocaleString()} characters.`);
-    input = { mode: "text", claim };
+    mode = "text";
+    input = { mode, claim, ...common };
   }
-  const trustedDomains = domainListFlag(flags, "trusted-domains"), blockedDomains = domainListFlag(flags, "blocked-domains");
-  input = { ...input, ...(trustedDomains.length ? { trusted_domains: trustedDomains } : {}), ...(blockedDomains.length ? { blocked_domains: blockedDomains } : {}) };
-  return client.verify(input, requestOptions(flags, 180_000));
+
+  await registerJob(context.jobsDir, { id: requestId, requestId, pid: context.pid, mode, state: "verifying", startedAt: Date.now(), ...(speaker ? { speaker } : {}) });
+  const progress = createProgress(context.writeErr, !context.json, context.color, context.progressIntervalMs);
+  progress.start("Verifying");
+  try {
+    return await client.verify(input, { ...requestOptions(flags, 180_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); void updateJob(context.jobsDir, requestId, { state: mapped }); progress.update(progressLabel(event.state)); } });
+  } finally {
+    progress.stop();
+    await removeJob(context.jobsDir, requestId);
+  }
+}
+
+function progressJobState(state: string): CliJobState {
+  if (state === "transcribing") return "transcribing";
+  if (state === "waiting") return "waiting";
+  if (state === "retrying") return "retrying";
+  return "verifying";
+}
+
+function progressLabel(state: string) {
+  if (state === "transcribing") return "Transcribing audio";
+  if (state === "waiting") return "Waiting for FactLens";
+  if (state === "retrying") return "Reconnecting";
+  if (state === "complete") return "Complete";
+  return "Verifying";
+}
+
+async function listCommand(context: CliContext) {
+  const jobs = await listJobs(context.jobsDir);
+  const now = Date.now();
+  const view = jobs.map((job) => ({ ...job, elapsed_ms: Math.max(0, now - job.startedAt) }));
+  if (context.json) { writeJson(context.writeOut, { concurrency: jobs.length, jobs: view }); return 0; }
+  if (!jobs.length) { context.writeOut(`${colorize("FactLens", 36, context.color)} has no active local jobs.\n`); return 0; }
+  const lines = [`${colorize("FactLens active jobs", 1, context.color)}  ${colorize(`Concurrency ${jobs.length}`, 36, context.color)}`];
+  for (const job of jobs) {
+    const state = colorize(job.state.toUpperCase(), stateColor(job.state), context.color);
+    lines.push(`${job.id.slice(0, 8)}  PID ${job.pid}  ${job.mode}  ${state}  ${formatElapsed(now - job.startedAt)}${job.speaker ? `  speaker: ${job.speaker}` : ""}`);
+  }
+  context.writeOut(`${lines.join("\n")}\n`);
+  return 0;
+}
+
+async function killCommand(args: string[], context: CliContext) {
+  const target = requiredText(args[0], "job ID or all");
+  const killed = await killJobs(context.jobsDir, target);
+  if (!killed.length) throw usageError(`No active FactLens job matches "${target}".`);
+  if (context.json) { writeJson(context.writeOut, { killed: killed.map((job) => ({ id: job.id, pid: job.pid })) }); return 0; }
+  context.writeOut(colorize(`Stopped ${killed.length} FactLens job${killed.length === 1 ? "" : "s"}.\n`, 33, context.color));
+  return 0;
+}
+
+function stateColor(state: CliJobState) {
+  if (state === "retrying") return 33;
+  if (state === "transcribing" || state === "uploading") return 36;
+  if (state === "waiting") return 35;
+  return 32;
+}
+
+function audioContentType(path: string) {
+  const extension = extname(path).toLowerCase();
+  const contentType = audioTypes[extension];
+  if (!contentType) throw usageError(`Unsupported audio file type "${extension || "unknown"}.`);
+  return contentType;
 }
 
 async function projectsCommand(client: FactLens, args: string[], flags: Flags, saved: CliConfig, context: CliContext) {
@@ -280,7 +388,7 @@ function outputSuccess(command: string, result: any, context: CliContext) {
     return;
   }
   if (command === "verify") {
-    context.writeOut(humanVerify(result));
+    context.writeOut(humanVerify(result, context.color));
     return;
   }
   if (command === "doctor") {
@@ -298,9 +406,9 @@ function outputSuccess(command: string, result: any, context: CliContext) {
   context.writeOut(`${JSON.stringify(result, null, 2)}\n`);
 }
 
-function appendHumanVerifyResult(lines: string[], result: any, index?: number) {
+function appendHumanVerifyResult(lines: string[], result: any, index?: number, color = false) {
   if (result?.claim) lines.push(index === undefined ? `Claim: ${result.claim}` : `Claim ${index + 1}: ${result.claim}`);
-  if (result?.verdictId) lines.push(`Verdict: ${result.verdictId}`);
+  if (result?.verdictId) lines.push(`Verdict: ${colorize(String(result.verdictId), verdictColor(String(result.verdictId)), color)}`);
   if (result?.confidence) lines.push(`Confidence: ${result.confidence}`);
   if (result?.evidenceStrength) lines.push(`Evidence: ${result.evidenceStrength}`);
   if (result?.explanation) lines.push(`\n${result.explanation}`);
@@ -310,22 +418,24 @@ function appendHumanVerifyResult(lines: string[], result: any, index?: number) {
   }
 }
 
-function humanVerify(result: VerifyResponse) {
-  const lines = ["FactLens verification complete"];
+function humanVerify(result: VerifyResponse, color = false) {
+  const lines = [colorize("FactLens verification complete", 1, color)];
   const results = Array.isArray(result.results) && result.results.length ? result.results : null;
   if (results) {
     results.forEach((item, index) => {
       if (index > 0) lines.push("");
-      appendHumanVerifyResult(lines, item, index);
+      appendHumanVerifyResult(lines, item, index, color);
     });
   } else {
-    appendHumanVerifyResult(lines, result);
+    appendHumanVerifyResult(lines, result, undefined, color);
   }
   if (result.request_id) lines.push(`\nRequest ID: ${result.request_id}`);
   if (result.response_time_ms !== undefined) lines.push(`Response time: ${result.response_time_ms} ms`);
   if (result.usage) lines.push(`Usage: ${JSON.stringify(result.usage)}`);
   return `${lines.join("\n")}\n`;
 }
+
+function verdictColor(verdict: string) { const value = verdict.toUpperCase(); if (value === "TRUE") return 32; if (value === "MOSTLY_TRUE") return 36; if (value === "MISLEADING") return 33; if (value === "FALSE") return 31; return 35; }
 
 async function mediaFile(path: string, kind: "image" | "audio") {
   const extension = extname(path).toLowerCase();
@@ -495,7 +605,7 @@ async function readSecret(prompt: string, input: NodeJS.ReadStream, output: Node
 }
 
 function helpText() {
-  return `FactLens CLI ${SDK_VERSION}\n\nUsage:\n  factlens configure [--api-key KEY] [--developer-token TOKEN]\n  factlens config show|clear\n  factlens doctor\n  factlens verify <claim> [--trusted-domains a.com,b.com] [--blocked-domains c.com] [--json]\n  factlens verify --file claim.txt\n  factlens verify --image image.png --claim "Claim about the image"\n  factlens verify --audio recording.mp3 [--claim "Optional claim"]\n  factlens usage [--account] [--project ID]\n  factlens account\n  factlens projects list\n  factlens projects create <name>\n  factlens projects update <project-id> <name>\n  factlens projects delete <project-id> --yes\n  factlens projects select <project-id>\n  factlens keys list [--project ID]\n  factlens keys create <label> [--project ID]\n  factlens keys revoke <key-id> [--project ID] --yes\n  factlens logs [--project ID] [--limit N] [--endpoint verify] [--status success|failed]\n  factlens request <request-id>\n\nSource preferences:\n  --trusted-domains LIST  Prioritize matching domains for this verification\n  --blocked-domains LIST  Exclude matching domains for this verification\n\nRequest options:\n  --timeout MS       Total client timeout\n  --retries N        Automatic retries (0-5)\n  --request-id UUID  Explicit idempotency/request ID\n  --json             Machine-readable output\n\nCredentials:\n  FACTLENS_API_KEY             Project key for Verify and runtime Usage\n  FACTLENS_DEVELOPER_TOKEN     Developer token for account management\n\nGet credentials: ${DASHBOARD}\n`;
+  return `FactLens CLI ${SDK_VERSION}\n\nUsage:\n  factlens configure [--api-key KEY] [--developer-token TOKEN]\n  factlens config show|clear\n  factlens doctor\n  factlens verify <claim> [--trusted-domains a.com,b.com] [--blocked-domains c.com] [--json]\n  factlens verify --file claim.txt\n  factlens verify --image image.png --claim "Claim about the image"\n  factlens verify --audio recording.mp3 [--claim "Optional claim"] [--speaker "Name"]\n  factlens list\n  factlens kill <job-id|all>\n  factlens usage [--account] [--project ID]\n  factlens account\n  factlens projects list\n  factlens projects create <name>\n  factlens projects update <project-id> <name>\n  factlens projects delete <project-id> --yes\n  factlens projects select <project-id>\n  factlens keys list [--project ID]\n  factlens keys create <label> [--project ID]\n  factlens keys revoke <key-id> [--project ID] --yes\n  factlens logs [--project ID] [--limit N] [--endpoint verify] [--status success|failed]\n  factlens request <request-id>\n\nSource preferences:\n  --trusted-domains LIST  Prioritize matching domains for this verification\n  --blocked-domains LIST  Exclude matching domains for this verification\n  --speaker NAME          Preserve speaker attribution for audio or transcript claims\n\nLocal jobs:\n  factlens list           Show active local verification jobs and concurrency\n  factlens kill ID        Stop one local job by request ID prefix\n  factlens kill all       Stop every active local FactLens job\n\nRequest options:\n  --timeout MS       Total client timeout\n  --retries N        Automatic retries (0-5)\n  --request-id UUID  Explicit idempotency/request ID\n  --json             Machine-readable output\n\nCredentials:\n  FACTLENS_API_KEY             Project key for Verify and runtime Usage\n  FACTLENS_DEVELOPER_TOKEN     Developer token for account management\n\nGet credentials: ${DASHBOARD}\n`;
 }
 
 const invokedPath = process.argv[1] || "";

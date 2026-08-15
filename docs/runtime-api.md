@@ -32,10 +32,12 @@ Audio/video:
 ```ts
 await factlens.verify({
   mode: "audio_video",
-  audio_base64: audioBase64,
-  content_type: "audio/mpeg",
+  audio_url: "https://example.com/interview.mp3",
+  speaker: "Jane Doe",
 });
 ```
+
+Audio verification is limited to 3 hours and costs one API credit per 10 minutes or part thereof. The CLI streams long local audio while the SDK can use `audio_url` for long form input. Inline `audio_base64` remains available for smaller media. Raw audio is not stored in the FactLens database.
 
 If you already have a transcript:
 
@@ -44,12 +46,15 @@ await factlens.verify({
   mode: "audio_video",
   transcript: existingTranscript,
   claim: "Optional focused claim",
+  speaker: "Jane Doe",
 });
 ```
 
+The first 100,000 transcript characters use the normal one credit charge. Each additional 30,000 characters or part thereof adds one credit.
+
 ## Source preferences
 
-Source preferences are request scoped and are never written to FactLens account, project, or CLI configuration. Use `trusted_domains` to prioritize matching evidence sources and `blocked_domains` to exclude matching domains. Blocked domains take precedence if the same domain appears in both arrays.
+Source preferences apply only to the current Verify request and are not saved to an account, project, API key, or CLI configuration. Trusted domains prioritize matching evidence. Blocked domains exclude matching evidence and take precedence if a domain appears in both lists.
 
 ```ts
 await factlens.verify({
@@ -66,14 +71,16 @@ CLI:
 factlens verify "Example claim" --trusted-domains reuters.com,apnews.com --blocked-domains example.com
 ```
 
-Every Verify request receives one UUID `X-Request-ID` unless you provide one. Automatic retries within a single SDK call reuse that ID for idempotency.
+Every Verify request receives one UUID `X-Request-ID` unless you provide one. Automatic retries and `REQUEST_IN_PROGRESS` polling within a single SDK call reuse that ID for idempotency.
 
 CLI equivalents:
 
 ```bash
 factlens verify "Example claim"
 factlens verify --image proof.png --claim "The image shows the stated event."
-factlens verify --audio clip.mp3
+factlens verify --audio clip.mp3 --speaker "Jane Doe"
+factlens list
+factlens kill REQUEST_ID
 ```
 
 ## Runtime usage

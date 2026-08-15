@@ -4,6 +4,15 @@ All notable changes to this package are documented here.
 
 ## Unreleased
 
+## 1.0.15 - 2026-08-15
+
+- Add animated colorful CLI progress, local job concurrency with `factlens list`, and `factlens kill`.
+- Add request scoped speaker attribution to CLI and SDK verification.
+- Stream CLI audio uploads for long form verification and keep polling `REQUEST_IN_PROGRESS` until the original request completes.
+- Document the 3 hour audio limit, one credit per 10 minutes of audio, and large transcript credit rules.
+- Keep human CLI output complete for multi-claim results while JSON mode remains clean for automation.
+- Support saved API key Source Preferences while request level SDK and CLI values override the matching saved defaults.
+
 ## 1.0.11 - 2026-08-15
 
 - Add request scoped trusted and blocked domain source preferences to the SDK and CLI.
