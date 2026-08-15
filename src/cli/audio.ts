@@ -129,13 +129,33 @@ export async function startAudioUpload(options: AudioUploadOptions) {
     }, options.requestId, "FactLens could not start audio verification after upload.");
     const body = await responseBody(response);
     const code = text(body?.error);
-    if (response.status === 409 && code === "REQUEST_IN_PROGRESS") return { requestId: options.requestId };
-    if (response.ok && (body?.ok === true || body?.request_id)) return { requestId: text(body?.request_id) || options.requestId };
+    if (response.status === 409 && code === "REQUEST_IN_PROGRESS") {
+      await releaseAcceptedLease(fetchImplementation, brokerUrl, commonHeaders, options.requestId, upload.object_path);
+      return { requestId: options.requestId };
+    }
+    if (response.ok && (body?.ok === true || body?.request_id)) {
+      await releaseAcceptedLease(fetchImplementation, brokerUrl, commonHeaders, options.requestId, upload.object_path);
+      return { requestId: text(body?.request_id) || options.requestId };
+    }
     await cleanup();
     throw responseError(response, body, options.requestId, "FactLens could not start verification for the uploaded audio.");
   } catch (error) {
     await cleanup();
     throw error;
+  }
+}
+
+async function releaseAcceptedLease(fetchImplementation: typeof globalThis.fetch, brokerUrl: string, headers: Record<string, string>, requestId: string, objectPath: string) {
+  for (const wait of [0, 250, 750]) {
+    if (wait) await delay(wait);
+    try {
+      await brokerRequest(fetchImplementation, brokerUrl, headers, {
+        action: "release",
+        request_id: requestId,
+        object_path: objectPath,
+      });
+      return;
+    } catch {}
   }
 }
 
