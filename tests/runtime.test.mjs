@@ -21,10 +21,36 @@ test("verify sends the project key, SDK metadata, JSON body, and one UUID reques
   assert.equal(request.init.method, "POST");
   assert.equal(headers.get("authorization"), "Bearer fl_live_project");
   assert.equal(headers.get("x-factlens-sdk"), "node");
-  assert.equal(headers.get("x-factlens-sdk-version"), "1.0.7");
+  assert.equal(headers.get("x-factlens-sdk-version"), "1.0.11");
   assert.match(headers.get("x-request-id"), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   assert.deepEqual(JSON.parse(request.init.body), { mode: "text", claim: "The sky is blue." });
   assert.equal(result.verdictId, "TRUE");
+});
+
+test("verify forwards request scoped trusted and blocked domains unchanged", async () => {
+  let body;
+  const client = new FactLens({
+    apiKey: "fl_live_project",
+    baseUrl: "https://example.test/",
+    fetch: async (_url, init) => {
+      body = JSON.parse(init.body);
+      return Response.json({ verdictId: "TRUE", sources: [] });
+    },
+  });
+
+  await client.verify({
+    mode: "text",
+    claim: "A claim",
+    trusted_domains: ["reuters.com", "https://apnews.com/world"],
+    blocked_domains: ["example.com", "bad.test"],
+  });
+
+  assert.deepEqual(body, {
+    mode: "text",
+    claim: "A claim",
+    trusted_domains: ["reuters.com", "https://apnews.com/world"],
+    blocked_domains: ["example.com", "bad.test"],
+  });
 });
 
 test("verify retries reuse the request ID and respect retryable response classes", async () => {
