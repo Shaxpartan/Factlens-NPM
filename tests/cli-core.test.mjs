@@ -25,11 +25,13 @@ test('CLI help and version are available without credentials', async () => {
   const h1 = harness();
   assert.equal(await runCli(['--help'], h1.deps), 0);
   assert.match(h1.out.join(''), /factlens verify/i);
+  assert.match(h1.out.join(''), /factlens list/i);
+  assert.match(h1.out.join(''), /factlens kill/i);
   assert.doesNotMatch(h1.out.join(''), /factlens (?:search|ai|transcribe)\b/i);
 
   const h2 = harness();
   assert.equal(await runCli(['--version'], h2.deps), 0);
-  assert.match(h2.out.join('').trim(), /^1\.0\.11$/);
+  assert.match(h2.out.join('').trim(), /^1\.0\.15$/);
 });
 
 test('unknown commands return a usage exit code and useful error', async () => {
