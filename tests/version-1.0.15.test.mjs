@@ -36,7 +36,8 @@ test('1.0.15 documents long media billing, speaker, progress, list and kill', ()
   assert.match(readme, /factlens list/);
   assert.match(readme, /factlens kill/);
   assert.match(readme, /animated/i);
-  assert.match(readme, /not saved to your account, project, API key, or CLI configuration/i);
+  assert.match(readme, /Source preferences apply only to the current verification request/i);
+  assert.match(readme, /Neither list is saved to your account, project, API key, or CLI configuration/i);
   assert.doesNotMatch(readme, /saved default/i);
   assert.doesNotMatch(runtimeDocs, /saved default/i);
   assert.match(changelog, /## 1\.0\.15/);
