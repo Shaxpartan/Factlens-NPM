@@ -54,6 +54,8 @@ export type VerifyInput = {
   language?: string;
   search_query?: string;
   results_per_search?: number;
+  trusted_domains?: string[];
+  blocked_domains?: string[];
   verdicts?: VerdictInput[];
   instructions?: string;
 };

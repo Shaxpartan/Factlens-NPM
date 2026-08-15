@@ -4,6 +4,10 @@ All notable changes to this package are documented here.
 
 ## Unreleased
 
+## 1.0.11 - 2026-08-15
+
+- Add request scoped trusted and blocked domain source preferences to the SDK and CLI.
+- Report FactLens CLI and SDK version 1.0.11 consistently in package metadata and request headers.
 - Align SDK and CLI documentation with the FactLens API rate of 30 checks per $1 and 30 free checks per UTC day for eligible free accounts.
 - Clarify that existing unused paid balances are migrated by the API backend and are not converted locally by the SDK.
 

@@ -47,6 +47,25 @@ await factlens.verify({
 });
 ```
 
+## Source preferences
+
+Source preferences are request scoped and are never written to FactLens account, project, or CLI configuration. Use `trusted_domains` to prioritize matching evidence sources and `blocked_domains` to exclude matching domains. Blocked domains take precedence if the same domain appears in both arrays.
+
+```ts
+await factlens.verify({
+  mode: "text",
+  claim: "Example claim",
+  trusted_domains: ["reuters.com", "apnews.com"],
+  blocked_domains: ["example.com"],
+});
+```
+
+CLI:
+
+```bash
+factlens verify "Example claim" --trusted-domains reuters.com,apnews.com --blocked-domains example.com
+```
+
 Every Verify request receives one UUID `X-Request-ID` unless you provide one. Automatic retries within a single SDK call reuse that ID for idempotency.
 
 CLI equivalents:

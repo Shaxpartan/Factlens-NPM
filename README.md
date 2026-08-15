@@ -255,6 +255,27 @@ await factlens.verify({
 });
 ```
 
+### Source preferences
+
+Source preferences apply only to the current verification request. Trusted domains are prioritized when they appear in evidence results. Blocked domains are excluded. Neither list is saved to your account, project, or CLI configuration.
+
+SDK:
+
+```ts
+await factlens.verify({
+  mode: "text",
+  claim: "A claim to verify",
+  trusted_domains: ["reuters.com", "apnews.com"],
+  blocked_domains: ["example.com"],
+});
+```
+
+CLI:
+
+```bash
+factlens verify "A claim to verify" --trusted-domains reuters.com,apnews.com --blocked-domains example.com
+```
+
 ### Runtime usage
 
 ```ts
