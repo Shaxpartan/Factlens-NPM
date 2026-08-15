@@ -11,10 +11,10 @@ export type AudioUploadOptions = {
   contentType: string;
   apiKey: string;
   requestId: string;
-  language?: string;
-  runtimeBaseUrl?: string;
-  audioUploadUrl?: string;
-  fetch?: typeof globalThis.fetch;
+  language?: string | undefined;
+  runtimeBaseUrl?: string | undefined;
+  audioUploadUrl?: string | undefined;
+  fetch?: typeof globalThis.fetch | undefined;
 };
 
 export async function startAudioUpload(options: AudioUploadOptions) {
