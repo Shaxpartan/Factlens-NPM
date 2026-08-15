@@ -4,6 +4,10 @@ All notable changes to this package are documented here.
 
 ## Unreleased
 
+## 6.0.0 - 2026-08-15
+
+- Release the current FactLens CLI and SDK as version 6.0.0.
+
 ## 1.0.15 - 2026-08-15
 
 - Add animated colorful CLI progress, local job concurrency with `factlens list`, and `factlens kill`.

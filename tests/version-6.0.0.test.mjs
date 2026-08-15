@@ -11,21 +11,21 @@ const changelog = await readFile(new URL('../CHANGELOG.md', import.meta.url), 'u
 const runtimeDocs = await readFile(new URL('../docs/runtime-api.md', import.meta.url), 'utf8');
 const usageDocs = await readFile(new URL('../docs/usage-and-limits.md', import.meta.url), 'utf8');
 
-test('1.0.15 release metadata and runtime SDK header stay synchronized', () => {
-  assert.equal(packageJson.version, '1.0.15');
-  assert.equal(packageLock.version, '1.0.15');
-  assert.equal(packageLock.packages?.['']?.version, '1.0.15');
-  assert.match(httpSource, /SDK_VERSION\s*=\s*["']1\.0\.15["']/);
+test('6.0.0 release metadata and runtime SDK header stay synchronized', () => {
+  assert.equal(packageJson.version, '6.0.0');
+  assert.equal(packageLock.version, '6.0.0');
+  assert.equal(packageLock.packages?.['']?.version, '6.0.0');
+  assert.match(httpSource, /SDK_VERSION\s*=\s*["']6\.0\.0["']/);
 });
 
-test('1.0.15 keeps multi result rendering and request in progress recovery', () => {
+test('6.0.0 keeps multi result rendering and request in progress recovery', () => {
   assert.match(cliSource, /Array\.isArray\(result\.results\)/);
   assert.match(cliSource, /appendHumanVerifyResult\(lines, item, index, color\)/);
   assert.match(httpSource, /REQUEST_IN_PROGRESS/);
   assert.match(httpSource, /onProgress/);
 });
 
-test('1.0.15 documents long media billing, speaker, progress, list, kill, and source default overrides', () => {
+test('6.0.0 documents long media billing, speaker, progress, list, kill, and source default overrides', () => {
   for (const doc of [readme, runtimeDocs, usageDocs]) {
     assert.match(doc, /3 hours/i);
     assert.match(doc, /10 minutes/i);
@@ -42,5 +42,5 @@ test('1.0.15 documents long media billing, speaker, progress, list, kill, and so
   assert.match(runtimeDocs, /saved as defaults for an API key/i);
   assert.match(runtimeDocs, /overrides the matching saved list for that request only/i);
   assert.match(runtimeDocs, /explicit empty array/i);
-  assert.match(changelog, /## 1\.0\.15/);
+  assert.match(changelog, /## 6\.0\.0/);
 });
