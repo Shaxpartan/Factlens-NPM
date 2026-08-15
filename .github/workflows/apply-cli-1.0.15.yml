@@ -36,11 +36,17 @@ jobs:
           new = """await edit('package-lock.json', (s) => {
             const matches = s.match(/\"version\": \"1\\.0\\.11\"/g) || [];
             if (matches.length < 2) throw new Error('Missing package-lock release versions');
-            return s.replace(/\"version\": \"1\\.0\\.11\"/g, (value, offset) => offset < 200 ? '\"version\": \"1.0.15\"' : value).replace(/\"version\": \"1\\.0\\.11\"/, '\"version\": \"1.0.15\"');
+            let changed = 0;
+            return s.replace(/\"version\": \"1\\.0\\.11\"/g, (value) => changed++ < 2 ? '\"version\": \"1.0.15\"' : value);
           });"""
           if old not in s:
               raise SystemExit('package-lock staging block mismatch')
-          p.write_text(s.replace(old, new, 1))
+          s = s.replace(old, new, 1)
+          guard = "  if (index < 0) throw new Error(`Missing ${label}`);"
+          replacement = "  if (index < 0 && label.startsWith('help ')) return text;\n  if (index < 0) throw new Error(`Missing ${label}`);"
+          if guard not in s:
+              raise SystemExit('once guard mismatch')
+          p.write_text(s.replace(guard, replacement, 1))
           PY
           node scripts/apply-cli-1.0.15.mjs
       - run: |
