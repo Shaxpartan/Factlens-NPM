@@ -1,0 +1,36 @@
+name: Assemble clean NPM 1.0.15 release
+
+on:
+  push:
+    branches:
+      - release/npm-1.0.15-20260815
+    paths:
+      - .github/workflows/assemble-clean-1.0.15.yml
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/npm-1.0.15-20260815
+          fetch-depth: 0
+      - run: |
+          git fetch origin d2e40c21fde4679cf0d1a930d8119b0242ad897c
+          git checkout d2e40c21fde4679cf0d1a930d8119b0242ad897c -- \
+            CHANGELOG.md README.md docs/runtime-api.md docs/usage-and-limits.md \
+            package.json package-lock.json \
+            src/cli/audio.ts src/cli/index.ts src/cli/jobs.ts src/cli/terminal.ts \
+            src/client.ts src/http.ts src/types/index.ts \
+            tests/cli-core.test.mjs tests/cli-jobs.test.mjs tests/cli-runtime.test.mjs \
+            tests/cli-speaker-progress.test.mjs tests/runtime.test.mjs \
+            tests/verify-timeout-contract.test.mjs tests/version-1.0.15.test.mjs
+          git rm tests/version-1.0.11.test.mjs
+          git config user.name "FactLens Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: release FactLens 1.0.15"
+          git push origin HEAD:release/npm-1.0.15-20260815
