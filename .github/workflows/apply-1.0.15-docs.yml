@@ -1,0 +1,30 @@
+name: Apply 1.0.15 documentation edits
+
+on:
+  push:
+    branches:
+      - agent/cli-progress-speaker-20260815
+    paths:
+      - scripts/apply-1.0.15-docs.mjs
+      - .github/workflows/apply-1.0.15-docs.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/cli-progress-speaker-20260815
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/apply-1.0.15-docs.mjs
+      - run: |
+          git config user.name "FactLens Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add README.md docs/runtime-api.md docs/usage-and-limits.md
+          git commit -m "docs: document 1.0.15 media and source defaults"
+          git push origin HEAD:agent/cli-progress-speaker-20260815
