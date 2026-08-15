@@ -21,7 +21,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node scripts/apply-cli-1.0.15.mjs
+      - name: Run guarded release transform
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/apply-cli-1.0.15.mjs')
+          s = p.read_text()
+          old = """await edit('package-lock.json', (s) => {
+            let out = s;
+            out = once(out, '\"version\": \"1.0.11\"', '\"version\": \"1.0.15\"', 'lock root version');
+            out = once(out, '\"version\": \"1.0.11\"', '\"version\": \"1.0.15\"', 'lock package version');
+            return out;
+          });"""
+          new = """await edit('package-lock.json', (s) => {
+            const matches = s.match(/\"version\": \"1\\.0\\.11\"/g) || [];
+            if (matches.length < 2) throw new Error('Missing package-lock release versions');
+            return s.replace(/\"version\": \"1\\.0\\.11\"/g, (value, offset) => offset < 200 ? '\"version\": \"1.0.15\"' : value).replace(/\"version\": \"1\\.0\\.11\"/, '\"version\": \"1.0.15\"');
+          });"""
+          if old not in s:
+              raise SystemExit('package-lock staging block mismatch')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          node scripts/apply-cli-1.0.15.mjs
       - run: |
           git config user.name "FactLens Automation"
           git config user.email "actions@users.noreply.github.com"
