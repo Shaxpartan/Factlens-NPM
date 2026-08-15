@@ -1,0 +1,30 @@
+name: Apply staged CLI 1.0.15 edits
+
+on:
+  push:
+    branches:
+      - agent/cli-progress-speaker-20260815
+    paths:
+      - scripts/apply-cli-1.0.15.mjs
+      - .github/workflows/apply-cli-1.0.15.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/cli-progress-speaker-20260815
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/apply-cli-1.0.15.mjs
+      - run: |
+          git config user.name "FactLens Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add package.json package-lock.json src README.md CHANGELOG.md tests
+          git commit -m "feat: release FactLens CLI 1.0.15"
+          git push origin HEAD:agent/cli-progress-speaker-20260815
