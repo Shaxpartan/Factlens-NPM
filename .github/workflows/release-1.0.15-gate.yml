@@ -1,0 +1,32 @@
+name: Verify clean NPM 1.0.15 release
+
+on:
+  push:
+    branches:
+      - release/npm-1.0.15-20260815
+    paths:
+      - .github/workflows/release-1.0.15-gate.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/npm-1.0.15-20260815
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:examples
+      - run: npm pack --dry-run
