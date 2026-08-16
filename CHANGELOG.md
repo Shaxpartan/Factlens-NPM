@@ -4,6 +4,11 @@ All notable changes to this package are documented here.
 
 ## Unreleased
 
+## 6.1.0 - 2026-08-16
+
+- Allow `factlens verify --image <path>` without `--claim`; optional `--claim` remains available as image focus or guidance.
+- Document that SDK image verification also treats `claim` as optional.
+
 ## 6.0.0 - 2026-08-15
 
 - Release the current FactLens CLI and SDK as version 6.0.0.
