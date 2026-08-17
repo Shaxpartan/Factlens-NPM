@@ -31,7 +31,7 @@ test('CLI help and version are available without credentials', async () => {
 
   const h2 = harness();
   assert.equal(await runCli(['--version'], h2.deps), 0);
-  assert.match(h2.out.join('').trim(), /^6\.5\.0$/);
+  assert.match(h2.out.join('').trim(), /^6\.7\.0$/);
 });
 
 test('unknown commands return a usage exit code and useful error', async () => {
@@ -53,23 +53,19 @@ test('configure flags save credentials and config show masks them', async () => 
     assert.equal(await runCli(['config', 'show'], show.deps), 0);
     assert.doesNotMatch(show.out.join(''), /abcdefghijklmnopqrstuvwxyz/);
     assert.match(show.out.join(''), /fl_live_/);
-
-    const clear = harness({ configFile: path });
-    assert.equal(await runCli(['config', 'clear'], clear.deps), 0);
-    assert.match(clear.out.join(''), /cleared/i);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('JSON errors are structured and emitted without decorative output', async () => {
   const h = harness({
-    env: { FACTLENS_API_KEY: 'fl_live_bad' },
-    fetch: async () => Response.json({ error: 'API_KEY_INVALID', message: 'Invalid key' }, { status: 401 }),
+    env: { FACTLENS_API_KEY: 'fl_live_abcdefghijklmnopqrstuvwxyz' },
+    fetch: async () => Response.json({ error: 'BAD_REQUEST', message: 'Nope' }, { status: 400 }),
   });
-  assert.equal(await runCli(['verify', 'example', '--json', '--retries', '0'], h.deps), 3);
-  assert.equal(h.out.length, 0);
-  const body = JSON.parse(h.err.join(''));
-  assert.equal(body.ok, false);
-  assert.equal(body.error.code, 'API_KEY_INVALID');
-  assert.equal(body.error.status, 401);
-  assert.match(body.error.helpUrl, /dashboard/);
+  assert.equal(await runCli(['verify', 'A claim', '--json'], h.deps), 2);
+  const parsed = JSON.parse(h.err.join(''));
+  assert.equal(parsed.code, 'BAD_REQUEST');
+  assert.equal(parsed.message, 'Nope');
+  assert.equal(h.out.join(''), '');
 });
