@@ -175,7 +175,7 @@ async function configureCommand(flags: Flags, context: CliContext) {
   };
   await saveConfig(next, context.configFile);
   if (context.json) writeJson(context.writeOut, { ok: true, configFile: context.configFile, apiKey: maskSecret(next.apiKey), developerToken: maskSecret(next.developerToken) });
-  else context.writeOut(`FactLens configuration saved.\nFile: ${context.configFile}\nAPI key: ${maskSecret(next.apiKey)}\nDeveloper token: ${maskSecret(next.developerToken)}\n`);
+  else context.writeOut(`FactLens configuration saved.\nFile: ${display.configFile}\nAPI key: ${display.apiKey}\nDeveloper token: ${display.developerToken}\nSelected project: ${display.selectedProjectId}\n`);
   return 0;
 }
 
@@ -518,7 +518,7 @@ function outputSuccess(command: string, result: any, context: CliContext) {
       if (timing) {
         const core = timing.serverTiming?.coreMs;
         const edge = timing.serverTiming?.edgeMs;
-        lines.push(`    Total ${formatDuration(timing.clientTotalMs, context.timeUnit)}${core === undefined ? "" : ` · Core ${formatDuration(core, context.timeUnit)}`}${edge === undefined ? "" : ` · Edge ${formatDuration(edge, context.timeUnit)}`}`);
+        lines.push(`    Total ${formatDuration(timing.clientTotalMs, context.timeUnit)}${core === undefined ? "" : ` · Server ${formatDuration(core, context.timeUnit)}`}${edge === undefined ? "" : ` · Edge ${formatDuration(edge, context.timeUnit)}`}`);
       }
     }
     context.writeOut(`${lines.join("\n")}\n`);
@@ -574,7 +574,7 @@ function humanRequestDetail(detail: any, color = false, timeUnit: TimeUnit = "au
   }
   const totalMs = Number(detail?.total_ms ?? detail?.duration_ms);
   const coreMs = Number(detail?.core_ms ?? detail?.response_time_ms ?? responseBody?.response_time_ms);
-  if (Number.isFinite(totalMs) || Number.isFinite(coreMs)) lines.push(`\nTiming: ${Number.isFinite(totalMs) ? formatDuration(totalMs, timeUnit) : "n/a"} total · ${Number.isFinite(coreMs) ? formatDuration(coreMs, timeUnit) : "n/a"} core`);
+  if (Number.isFinite(totalMs) || Number.isFinite(coreMs)) lines.push(`\nTiming: ${Number.isFinite(totalMs) ? formatDuration(totalMs, timeUnit) : "n/a"} total · ${Number.isFinite(coreMs) ? formatDuration(coreMs, timeUnit) : "n/a"} Server`);
   if (detail?.error_code || detail?.error) lines.push(`Error: ${detail.error_code || JSON.stringify(detail.error)}`);
   return `${lines.join("\n")}\n`;
 }
@@ -599,14 +599,14 @@ function humanVerify(result: VerifyResponse, color = false, timeUnit: TimeUnit =
   if (Number.isFinite(totalMs) || Number.isFinite(coreMs)) {
     const total = Number.isFinite(totalMs) ? formatDuration(totalMs, timeUnit) : "n/a";
     const core = Number.isFinite(coreMs) ? formatDuration(coreMs, timeUnit) : "n/a";
-    lines.push(`Timing: ${total} total · ${core} core`);
+    lines.push(`Timing: ${total} total · ${core} Server`);
   }
   if (meta && (verbose || trace)) {
     const t = meta.serverTiming || {};
     const parts = [
       t.authMs === undefined ? null : `Auth ${formatDuration(t.authMs, timeUnit)}`,
       t.customizationMs === undefined ? null : `Config ${formatDuration(t.customizationMs, timeUnit)}`,
-      t.coreMs === undefined ? null : `Core ${formatDuration(t.coreMs, timeUnit)}`,
+      t.coreMs === undefined ? null : `Server ${formatDuration(t.coreMs, timeUnit)}`,
       t.postprocessMs === undefined ? null : `Post ${formatDuration(t.postprocessMs, timeUnit)}`,
       t.edgeMs === undefined ? null : `Edge ${formatDuration(t.edgeMs, timeUnit)}`,
     ].filter(Boolean);
