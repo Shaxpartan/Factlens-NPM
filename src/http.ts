@@ -86,7 +86,7 @@ export class HttpTransport {
       && path === "/v1/verify"
       && Boolean(requestId)
       && isFactLensProxyRuntime(baseUrl);
-    const reconnectRetries = reconnectVerify ? boundedInteger(options.maxRetries, 2, 0, 5) : 0;
+    const reconnectRetries = reconnectVerify ? boundedInteger(options.maxRetries, 1, 0, 5) : 0;
     let attempt = 0;
     let pollCount = 0;
     let progressState: VerifyProgress["state"] | undefined;
