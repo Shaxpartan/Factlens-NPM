@@ -1,0 +1,8 @@
+/home/runner/work/Factlens-NPM/Factlens-NPM/scripts/apply-v650-cli.mjs:211
+      context.writeOut(\`${items.map((item: any) => item?.verdictId || "").filter(Boolean).join("\\n")}\\n\`);
+                                          ^
+
+SyntaxError: Unexpected token ':'
+    at checkSyntax (node:internal/main/check_syntax:74:5)
+
+Node.js v20.20.2
