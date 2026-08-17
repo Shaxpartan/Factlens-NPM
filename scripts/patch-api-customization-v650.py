@@ -13,6 +13,7 @@ if 'DEFAULT_API_INPUT_BUDGET_TOKENS' not in source:
     )
 
 source = source.replace('type Method = "GET" | "POST" | "PATCH" | "DELETE";', 'type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";')
+source = source.replace('"Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",', '"Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",')
 
 route_comment = '// DELETE /v1/projects/:projectId/keys/:keyId\n'
 if '// GET /v1/projects/:projectId/keys/:keyId/customization' not in source:
@@ -234,7 +235,6 @@ if 'customizationBaseMatch' not in source:
 
 platform.write_text(source)
 
-# Fix the stale source-shape assertion so the current guarded v83 wrapper is allowed.
 preauth = root / 'tests/preauth-wiring.test.mjs'
 text = preauth.read_text()
 text = text.replace(
@@ -243,7 +243,6 @@ text = text.replace(
 )
 preauth.write_text(text)
 
-# Add a focused source-contract regression suite.
 test_path = root / 'tests/api-key-customization-platform-v84.test.mjs'
 test_path.write_text(r'''import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -261,6 +260,7 @@ test('developer-token platform exposes project-owned API-key customization route
   assert.match(source, /ownedApiKey\(client, userId/);
   assert.match(source, /factlens_api_key_prompt_configs/);
   assert.match(source, /factlens_api_key_verdict_configs/);
+  assert.match(source, /GET, POST, PUT, PATCH, DELETE, OPTIONS/);
 });
 
 test('customization route reuses canonical normalization and 8k prompt defaults', async () => {
