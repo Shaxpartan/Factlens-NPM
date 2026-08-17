@@ -6,10 +6,30 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  canonicalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Canonicalize v6.7 runtime release
+        if: github.ref == 'refs/heads/work/v6.7.0-runtime-integration'
+        run: |
+          node scripts/apply-v6.7-runtime-release.mjs
+          if ! git diff --quiet -- src tests README.md CHANGELOG.md; then
+            git config user.name "github-actions[bot]"
+            git config user.email "4189824+github-actions[bot]@users.noreply.github.com"
+            git add src tests README.md CHANGELOG.md
+            git commit -m "feat: canonicalize FactLens NPM v6.7 runtime release"
+            git push origin HEAD:work/v6.7.0-runtime-integration
+          fi
+
   test:
+    needs: canonicalize
     strategy:
       fail-fast: false
       matrix:
@@ -21,6 +41,9 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      - name: Apply v6.7 runtime release source
+        if: github.ref == 'refs/heads/work/v6.7.0-runtime-integration'
+        run: node scripts/apply-v6.7-runtime-release.mjs
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
