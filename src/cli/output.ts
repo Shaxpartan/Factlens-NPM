@@ -14,6 +14,8 @@ export function serializeError(error: unknown) {
       status: error.status,
       ...(error.requestId ? { requestId: error.requestId } : {}),
       retryable: error.retryable,
+      ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }),
+      ...(error.meta === undefined ? {} : { meta: error.meta }),
       ...(error.stage ? { stage: error.stage } : {}),
       ...(error.details === undefined ? {} : { details: error.details }),
       ...(error.helpUrl ? { helpUrl: error.helpUrl } : {}),
@@ -32,6 +34,7 @@ export function humanError(error: unknown) {
   const lines = [`Error: ${value.message}`];
   const meta = [value.code && `Code: ${value.code}`, value.status ? `HTTP: ${value.status}` : "", value.stage ? `Stage: ${value.stage}` : "", value.requestId ? `Request ID: ${value.requestId}` : ""].filter(Boolean);
   if (meta.length) lines.push(meta.join(" · "));
+  if (value.retryAfterMs !== undefined) lines.push(`Retry after: ${value.retryAfterMs} ms`);
   if (value.helpUrl) lines.push(`Help: ${value.helpUrl}`);
   return `${lines.join("\n")}\n`;
 }
