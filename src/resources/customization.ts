@@ -32,8 +32,8 @@ export class CustomizationResource {
       method: "PATCH",
       auth: "management",
       body: {
-        trusted_domains: input.trustedDomains ?? [],
-        blocked_domains: input.blockedDomains ?? [],
+        ...(input.trustedDomains === undefined ? {} : { trusted_domains: input.trustedDomains }),
+        ...(input.blockedDomains === undefined ? {} : { blocked_domains: input.blockedDomains }),
       },
       timeout: 60_000,
       automaticRequestId: true,
