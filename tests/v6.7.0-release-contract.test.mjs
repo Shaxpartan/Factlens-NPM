@@ -175,7 +175,7 @@ test('request detail human output renders stored verdict results and omits legac
   } }), { FACTLENS_API_KEY: '', FACTLENS_DEVELOPER_TOKEN: 'fldev_live_developer' });
   assert.equal(await runCli(['request', 'request-67'], h.deps), 0);
   const text = h.out.join('');
-  for (const expected of ['First', 'Second', 'Verdict: TRUE', 'Verdict: FALSE', '500ms total', '300ms core']) assert.match(text, new RegExp(expected));
+  for (const expected of ['First', 'Second', 'Verdict: TRUE', 'Verdict: FALSE', '0.5s total', '0.3s core']) assert.match(text, new RegExp(expected.replace('.', '\\.')));
   assert.doesNotMatch(text, /\bInput\b/);
   assert.doesNotMatch(text, /\bPipeline\b/);
 });
