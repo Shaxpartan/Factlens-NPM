@@ -156,3 +156,22 @@ test('human Verify output renders every multi-claim result and request metadata 
   assert.equal((text.match(/Response time:/g) || []).length, 1);
   assert.equal((text.match(/Usage:/g) || []).length, 1);
 });
+
+test('human timing calls the existing core metric Server without changing the wire metric', async () => {
+  const h = harness(async () => Response.json({
+    request_id: '01914f52-79f6-4d4f-b456-426614174002',
+    claim: 'Claim',
+    verdictId: 'TRUE',
+    explanation: 'Supported.',
+    confidence: 'HIGH',
+    evidenceStrength: 'STRONG',
+    sources: [],
+    response_time_ms: 900,
+  }, { headers: { 'Server-Timing': 'core;dur=900, edge;dur=1200', 'X-FactLens-Edge-Time-Ms': '1200' } }));
+
+  assert.equal(await runCli(['verify', 'Claim', '--verbose'], h.deps), 0);
+  const text = h.out.join('');
+  assert.match(text, /Timing: .* total · 0\.9s Server/);
+  assert.match(text, /Runtime: .*Server 0\.9s/);
+  assert.doesNotMatch(text, /\bCore\b|0\.9s core/);
+});
