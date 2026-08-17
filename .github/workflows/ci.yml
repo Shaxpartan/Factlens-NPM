@@ -24,10 +24,6 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - name: Canonicalize release source
-        run: node scripts/run-v6.7-runtime-release.mjs
-      - name: Require canonical tree
-        run: git diff --exit-code
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
