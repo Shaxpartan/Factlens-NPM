@@ -111,7 +111,7 @@ test('CLI rejects conflicting media input locally before any request', async () 
   const code = await runCli(['verify', '--image', 'x.png', '--audio', 'x.mp3', '--claim', 'claim'], h.deps);
   assert.equal(code, 2);
   assert.equal(calls, 0);
-  assert.match(h.err.join(''), /only one of --file, --image, or --audio/i);
+  assert.match(h.err.join(''), /only one explicit input source.*--file.*--image.*--audio.*--transcript.*--audio-url/i);
 });
 
 test('human Verify output contains result diagnostics without exposing transport noise', async () => {
