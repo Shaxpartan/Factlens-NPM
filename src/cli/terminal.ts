@@ -12,7 +12,9 @@ export function colorize(value: string, code: number, enabled: boolean) {
 export function colorizeHex(value: string, hex: string | undefined, enabled: boolean) {
   const match = String(hex || "").trim().match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   if (!enabled || !match) return value;
-  const [, r, g, b] = match;
+  const r = match[1] ?? "00";
+  const g = match[2] ?? "00";
+  const b = match[3] ?? "00";
   return `${ESC}38;2;${Number.parseInt(r, 16)};${Number.parseInt(g, 16)};${Number.parseInt(b, 16)}m${value}${ESC}0m`;
 }
 
