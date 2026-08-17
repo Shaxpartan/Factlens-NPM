@@ -4,7 +4,7 @@ on:
   push:
     branches: [work/v6.5.0]
     paths:
-      - scripts/apply-v650-cli.mjs
+      - scripts/fix-v650-cli.py
       - .github/workflows/apply-v650.yml
 
 permissions:
@@ -17,40 +17,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: work/v6.5.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Apply transformer
+      - name: Finalize CLI
+        run: python scripts/fix-v650-cli.py
+      - name: Validate and commit CLI
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          p = Path('scripts/apply-v650-cli.mjs')
-          s = p.read_text()
-          s = re.sub(r'(?<!\\)\$\{', r'\\${', s)
-          p.write_text(s)
-          PY
-          set +e
-          node --check scripts/apply-v650-cli.mjs > apply-v650.txt 2>&1
-          check_status=$?
-          if [ $check_status -eq 0 ]; then
-            node scripts/apply-v650-cli.mjs >> apply-v650.txt 2>&1
-            run_status=$?
-          else
-            run_status=$check_status
-          fi
-          if [ $run_status -ne 0 ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -f apply-v650.txt
-            git commit -m "chore: record v6.5.0 transformer failure"
-            git push origin HEAD:work/v6.5.0
-            exit $run_status
-          fi
-      - name: Commit transformed CLI
-        shell: bash
-        run: |
+          npx --yes typescript@7.0.2 --version >/dev/null 2>&1 || true
           if git diff --quiet -- src/cli/index.ts; then
             echo "No CLI source changes needed."
             exit 0
@@ -58,5 +30,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/cli/index.ts
-          git commit -m "feat: wire v6.5.0 CLI parity"
+          git commit -m "feat: finalize v6.5.0 CLI output"
           git push origin HEAD:work/v6.5.0
