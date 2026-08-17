@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { FactLensConfigurationError, FactLensError, isRetryableStatus } from "./errors.js";
+import { buildResponseMeta } from "./runtime/response-meta.js";
+import type { ResponseMeta } from "./runtime/response-meta.js";
 import type { VerificationStage } from "./errors.js";
 import type { RequestOptions } from "./types/index.js";
 
-export const SDK_VERSION = "6.5.0";
+export const SDK_VERSION = "6.7.0";
 export const FACTLENS_DASHBOARD_URL = "https://api.factlens.pro/dashboard";
 
 const RUNTIME_VERIFY_RECONNECT_WINDOW_MS = 23_000;
@@ -26,6 +28,8 @@ type TransportRequest = {
   timeout: number;
   automaticRequestId?: boolean;
 };
+
+export type DetailedTransportResponse<T> = { data: T; meta: ResponseMeta };
 
 type ErrorBody = {
   error?: unknown;
@@ -56,6 +60,10 @@ export class HttpTransport {
   }
 
   async request<T>(path: string, request: TransportRequest): Promise<T> {
+    return (await this.requestDetailed<T>(path, request)).data;
+  }
+
+  async requestDetailed<T>(path: string, request: TransportRequest): Promise<DetailedTransportResponse<T>> {
     const token = request.auth === "runtime" ? this.apiKey : this.developerToken;
     if (!token) {
       const runtime = request.auth === "runtime";
@@ -68,7 +76,9 @@ export class HttpTransport {
     }
 
     const options = request.options ?? {};
-    const maxRetries = boundedInteger(options.maxRetries, 2, 0, 5);
+    const readOnly = request.method === "GET";
+    const defaultRetries = readOnly ? 1 : 0;
+    const maxRetries = boundedInteger(options.maxRetries, defaultRetries, 0, readOnly ? 5 : 0);
     const timeout = resolveTimeout(options, request.timeout);
     const startedAt = monotonicNow();
     const deadline = startedAt + timeout;
@@ -148,7 +158,7 @@ export class HttpTransport {
           status: 0,
           code: "NETWORK_ERROR",
           requestId,
-          retryable: true,
+          retryable: readOnly,
           cause,
         });
       } finally {
@@ -157,7 +167,16 @@ export class HttpTransport {
       }
 
       const body = await responseBody(response);
-      if (response.ok) { progress("complete"); return body as T; }
+      if (response.ok) {
+        progress("complete");
+        const meta = buildResponseMeta({
+          headers: response.headers,
+          clientTotalMs: Math.max(0, monotonicNow() - startedAt),
+          status: response.status,
+        });
+        if (!meta.requestId && requestId) meta.requestId = requestId;
+        return { data: body as T, meta };
+      }
 
       const errorBody = isRecord(body) ? body as ErrorBody : {};
       const code = textValue(errorBody.error) || `HTTP_${response.status}`;
@@ -174,7 +193,7 @@ export class HttpTransport {
         continue;
       }
 
-      const retryable = response.status === 409 ? false : isRetryableStatus(response.status);
+      const retryable = readOnly && response.status !== 409 && isRetryableStatus(response.status);
 
       if (retryable && attempt < maxRetries) {
         progress("retrying");
