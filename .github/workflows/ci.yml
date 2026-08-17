@@ -26,6 +26,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - name: Run tests with diagnostics
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output-node-${{ matrix.node }}
+          path: test-output.txt
       - run: npm run test:examples
       - run: npm pack --dry-run
