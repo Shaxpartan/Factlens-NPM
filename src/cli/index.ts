@@ -175,7 +175,7 @@ async function configureCommand(flags: Flags, context: CliContext) {
   };
   await saveConfig(next, context.configFile);
   if (context.json) writeJson(context.writeOut, { ok: true, configFile: context.configFile, apiKey: maskSecret(next.apiKey), developerToken: maskSecret(next.developerToken) });
-  else context.writeOut(`FactLens configuration saved.\nFile: ${display.configFile}\nAPI key: ${display.apiKey}\nDeveloper token: ${display.developerToken}\nSelected project: ${display.selectedProjectId}\n`);
+  else context.writeOut(`FactLens configuration saved.\nFile: ${context.configFile}\nAPI key: ${maskSecret(next.apiKey)}\nDeveloper token: ${maskSecret(next.developerToken)}\n`);
   return 0;
 }
 
