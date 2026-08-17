@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  canonicalize:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,41 +28,74 @@ jobs:
             git push origin HEAD:work/v6.7.0-runtime-integration
           fi
 
-  test:
-    needs: canonicalize
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [18, 20, 22]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 18
           cache: npm
-      - name: Apply v6.7 runtime release source
-        if: github.ref == 'refs/heads/work/v6.7.0-runtime-integration'
-        run: node scripts/run-v6.7-runtime-release.mjs
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run test:examples
-      - run: npm pack --dry-run
+      - name: Verify Node 18
+        id: node18
+        shell: bash
+        run: |
+          set +e
+          : > /tmp/factlens-npm-node18.log
+          status=0
+          for command in "npm ci" "npm run typecheck" "npm test" "npm run test:examples" "npm pack --dry-run"; do
+            echo "> $command" >> /tmp/factlens-npm-node18.log
+            bash -lc "$command" >> /tmp/factlens-npm-node18.log 2>&1
+            code=$?
+            if [ "$code" -ne 0 ]; then status=$code; break; fi
+          done
+          echo "status=$status" >> "$GITHUB_OUTPUT"
 
-  verified:
-    needs: test
-    if: github.ref == 'refs/heads/work/v6.7.0-runtime-integration' && !contains(github.event.head_commit.message, 'ci: record v6.7 verification')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          ref: work/v6.7.0-runtime-integration
-      - name: Record verified release gate
+          node-version: 20
+          cache: npm
+      - name: Verify Node 20
+        id: node20
+        shell: bash
+        run: |
+          set +e
+          : > /tmp/factlens-npm-node20.log
+          status=0
+          for command in "npm ci" "npm run typecheck" "npm test" "npm run test:examples" "npm pack --dry-run"; do
+            echo "> $command" >> /tmp/factlens-npm-node20.log
+            bash -lc "$command" >> /tmp/factlens-npm-node20.log 2>&1
+            code=$?
+            if [ "$code" -ne 0 ]; then status=$code; break; fi
+          done
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Verify Node 22
+        id: node22
+        shell: bash
+        run: |
+          set +e
+          : > /tmp/factlens-npm-node22.log
+          status=0
+          for command in "npm ci" "npm run typecheck" "npm test" "npm run test:examples" "npm pack --dry-run"; do
+            echo "> $command" >> /tmp/factlens-npm-node22.log
+            bash -lc "$command" >> /tmp/factlens-npm-node22.log 2>&1
+            code=$?
+            if [ "$code" -ne 0 ]; then status=$code; break; fi
+          done
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Persist v6.7 release evidence
+        if: always() && github.ref == 'refs/heads/work/v6.7.0-runtime-integration' && !contains(github.event.head_commit.message, 'ci: record v6.7 verification') && !contains(github.event.head_commit.message, 'ci: record v6.7 failure')
+        shell: bash
         run: |
           mkdir -p docs/superpowers/verification
           tested_sha=$(git rev-parse HEAD)
-          cat > docs/superpowers/verification/ci-v6.7.0-pass.md <<EOF
+          s18="${{ steps.node18.outputs.status }}"
+          s20="${{ steps.node20.outputs.status }}"
+          s22="${{ steps.node22.outputs.status }}"
+          if [ "$s18" = "0" ] && [ "$s20" = "0" ] && [ "$s22" = "0" ]; then
+            cat > docs/superpowers/verification/ci-v6.7.0-pass.md <<EOF
           # FactLens NPM v6.7.0 CI Pass
 
           Tested branch head: \`$tested_sha\`
@@ -74,8 +107,38 @@ jobs:
           - npm run test:examples
           - npm pack --dry-run
           EOF
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/superpowers/verification/ci-v6.7.0-pass.md
-          git commit -m "ci: record v6.7 verification"
-          git push origin HEAD:work/v6.7.0-runtime-integration
+            rm -f docs/superpowers/verification/ci-v6.7.0-failure.md
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add docs/superpowers/verification/ci-v6.7.0-pass.md docs/superpowers/verification/ci-v6.7.0-failure.md 2>/dev/null || true
+            git commit -m "ci: record v6.7 verification"
+            git push origin HEAD:work/v6.7.0-runtime-integration
+          else
+            {
+              echo '# FactLens NPM v6.7.0 CI Failure'
+              echo
+              echo "Tested branch head: \`$tested_sha\`"
+              echo
+              echo "Node 18 exit: $s18"
+              echo "Node 20 exit: $s20"
+              echo "Node 22 exit: $s22"
+              for version in 18 20 22; do
+                echo
+                echo "## Node $version tail"
+                echo '```text'
+                tail -n 180 "/tmp/factlens-npm-node${version}.log" 2>/dev/null || true
+                echo '```'
+              done
+            } > docs/superpowers/verification/ci-v6.7.0-failure.md
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add docs/superpowers/verification/ci-v6.7.0-failure.md
+            git commit -m "ci: record v6.7 failure"
+            git push origin HEAD:work/v6.7.0-runtime-integration
+          fi
+
+      - name: Fail workflow if any release gate failed
+        if: always()
+        shell: bash
+        run: |
+          [ "${{ steps.node18.outputs.status }}" = "0" ] && [ "${{ steps.node20.outputs.status }}" = "0" ] && [ "${{ steps.node22.outputs.status }}" = "0" ]
