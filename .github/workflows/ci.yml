@@ -2,21 +2,18 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-      - V50.0.0
-      - work/v6.7.0-runtime-integration
+    branches: [main, V50.0.0]
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        node:
-          - 18
-          - 20
-          - 22
+        node: [18, 20, 22]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,25 +23,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - name: Run tests with diagnostics
-        shell: bash
-        run: |
-          set -o pipefail
-          npm test 2>&1 | tee test-output.txt
-      - name: Build corrected lockfile diagnostic
-        if: always() && matrix.node == 20
-        run: node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package-lock.json','utf8'));p.version='6.7.0';p.packages[''].version='6.7.0';fs.writeFileSync('package-lock.fixed.json',JSON.stringify(p,null,2)+'\n')"
-      - name: Upload test diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-output-node-${{ matrix.node }}
-          path: test-output.txt
-      - name: Upload corrected lockfile diagnostic
-        if: always() && matrix.node == 20
-        uses: actions/upload-artifact@v4
-        with:
-          name: package-lock-v67-fixed
-          path: package-lock.fixed.json
+      - run: npm test
       - run: npm run test:examples
       - run: npm pack --dry-run
