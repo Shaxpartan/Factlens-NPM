@@ -31,11 +31,20 @@ jobs:
         run: |
           set -o pipefail
           npm test 2>&1 | tee test-output.txt
+      - name: Build corrected lockfile diagnostic
+        if: always() && matrix.node == 20
+        run: node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package-lock.json','utf8'));p.version='6.7.0';p.packages[''].version='6.7.0';fs.writeFileSync('package-lock.fixed.json',JSON.stringify(p,null,2)+'\n')"
       - name: Upload test diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-output-node-${{ matrix.node }}
           path: test-output.txt
+      - name: Upload corrected lockfile diagnostic
+        if: always() && matrix.node == 20
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-lock-v67-fixed
+          path: package-lock.fixed.json
       - run: npm run test:examples
       - run: npm pack --dry-run
