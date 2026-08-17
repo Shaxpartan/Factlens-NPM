@@ -31,7 +31,7 @@ test('CLI help and version are available without credentials', async () => {
 
   const h2 = harness();
   assert.equal(await runCli(['--version'], h2.deps), 0);
-  assert.match(h2.out.join('').trim(), /^6\.1\.0$/);
+  assert.match(h2.out.join('').trim(), /^6\.5\.0$/);
 });
 
 test('unknown commands return a usage exit code and useful error', async () => {

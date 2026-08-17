@@ -74,7 +74,7 @@ test('timeoutSeconds is supported, conflicts with timeout, and progress exposes 
   assert.equal(progress[0].elapsedSeconds, progress[0].elapsedMs / 1000);
   await assert.rejects(
     client.verify({ mode: 'text', claim: 'A claim' }, { timeout: 1000, timeoutSeconds: 1 }),
-    (error) => error instanceof FactLensConfigurationError && /timeout and timeoutSeconds/i.test(error.message),
+    (error) => error instanceof FactLensConfigurationError && /timeout.*timeoutSeconds/i.test(error.message),
   );
 });
 

@@ -11,6 +11,6 @@ test("SDK keeps a 180 second default and extends only long audio URL verificatio
 });
 
 test("CLI keeps ordinary verification at 180 seconds and streamed audio at 30 minutes", () => {
-  assert.match(cliSource, /requestOptions\(flags, 180_000\)/);
+  assert.match(cliSource, /requestOptions\(flags, mode === "audio_video" \? 1_800_000 : 180_000\)/);
   assert.match(cliSource, /requestOptions\(flags, 1_800_000\)/);
 });

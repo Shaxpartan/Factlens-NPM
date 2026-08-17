@@ -292,6 +292,10 @@ async function verifyCommand(client: FactLens, positionals: string[], flags: Fla
     await registerJob(context.jobsDir, { id: requestId, requestId, pid: context.pid, mode, state: "uploading", startedAt: Date.now(), ...(speaker ? { speaker } : {}) });
     const interactive = !context.json && Boolean(context.stdout.isTTY);
     const progress = createProgress(context.writeErr, interactive, context.color, context.progressIntervalMs, "audio");
+    let pendingJobUpdate = Promise.resolve();
+    const queueJobUpdate = (state: CliJobState) => {
+      pendingJobUpdate = pendingJobUpdate.then(() => updateJob(context.jobsDir, requestId, { state })).catch(() => {});
+    };
     progress.start("Uploading audio");
     try {
       await startAudioUpload({
@@ -308,10 +312,11 @@ async function verifyCommand(client: FactLens, positionals: string[], flags: Fla
       await updateJob(context.jobsDir, requestId, { state: "transcribing" });
       progress.update("Transcribing audio");
       const pollInput = { mode, audio_job: true, ...(claim ? { claim } : {}), ...(speaker ? { speaker } : {}), ...common } as VerifyInput & { audio_job: true };
-      const result = await client.verify(pollInput, { ...requestOptions(flags, 1_800_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); void updateJob(context.jobsDir, requestId, { state: mapped }); progress.update(progressLabel(event.state)); } });
+      const result = await client.verify(pollInput, { ...requestOptions(flags, 1_800_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); queueJobUpdate(mapped); progress.update(progressLabel(event.state)); } });
       return attachClientElapsed(result, startedAt);
     } finally {
       progress.stop();
+      await pendingJobUpdate;
       await removeJob(context.jobsDir, requestId);
     }
   } else if (audioUrl) {
@@ -333,12 +338,17 @@ async function verifyCommand(client: FactLens, positionals: string[], flags: Fla
   const progressMode = mode === "image_post" ? "image" : mode === "audio_video" ? "audio" : "text";
   const interactive = !context.json && Boolean(context.stdout.isTTY);
   const progress = createProgress(context.writeErr, interactive, context.color, context.progressIntervalMs, progressMode);
+  let pendingJobUpdate = Promise.resolve();
+  const queueJobUpdate = (state: CliJobState) => {
+    pendingJobUpdate = pendingJobUpdate.then(() => updateJob(context.jobsDir, requestId, { state })).catch(() => {});
+  };
   progress.start(mode === "image_post" ? "Verifying image" : "Verifying");
   try {
-    const result = await client.verify(input, { ...requestOptions(flags, mode === "audio_video" ? 1_800_000 : 180_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); void updateJob(context.jobsDir, requestId, { state: mapped }); progress.update(progressLabel(event.state)); } });
+    const result = await client.verify(input, { ...requestOptions(flags, mode === "audio_video" ? 1_800_000 : 180_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); queueJobUpdate(mapped); progress.update(progressLabel(event.state)); } });
     return attachClientElapsed(result, startedAt);
   } finally {
     progress.stop();
+    await pendingJobUpdate;
     await removeJob(context.jobsDir, requestId);
   }
 }

@@ -85,12 +85,12 @@ test('human verify uses terminal color and emits an indeterminate progress bar w
   try {
     const h = harness(async () => {
       await new Promise((resolve) => setTimeout(resolve, 40));
-      return Response.json({ verdictId: 'TRUE', explanation: 'Supported.', confidence: 'HIGH', evidenceStrength: 'STRONG', sources: [] });
-    }, { configFile: join(root, 'config.json'), color: true, progressIntervalMs: 5 });
+      return Response.json({ verdictId: 'TRUE', verdictColor: '#22c55e', explanation: 'Supported.', confidence: 'HIGH', evidenceStrength: 'STRONG', sources: [] });
+    }, { configFile: join(root, 'config.json'), color: true, progressIntervalMs: 5, stdout: { isTTY: true } });
 
     assert.equal(await runCli(['verify', 'Earth orbits the Sun.'], h.deps), 0);
     assert.match(h.err.join(''), /Verifying/i);
-    assert.match(h.err.join(''), /[●━·]/);
+    assert.match(h.err.join(''), /[◐◓◑◒━✓]/);
     assert.match(h.err.join(''), /\x1b\[/);
     assert.match(h.out.join(''), /\x1b\[/);
 
