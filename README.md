@@ -6,167 +6,189 @@
 
 The official Node.js, TypeScript SDK, and command-line interface for the FactLens verification API.
 
-FactLens exposes a focused public runtime: **Verify**. Transcription, current-web evidence retrieval, safety checks, and AI analysis are internal stages of the verification pipeline rather than standalone customer services.
+FactLens exposes a focused runtime: **Verify**. Transcription, evidence retrieval, safety checks, and AI analysis remain internal verification stages rather than standalone provider commands.
 
-Node.js 18 or newer is required.
+**Current package:** `6.5.0`  
+**Runtime:** Node.js 18+
 
 ## Install
-
-Install the SDK in a project:
 
 ```bash
 npm install factlens
 ```
 
-That local package also contains the CLI:
+The same package contains the CLI:
 
 ```bash
 npx factlens --help
 npx factlens verify "Earth orbits the Sun."
 ```
 
-If you want the bare `factlens` command available from any directory:
+For a global command:
 
 ```bash
 npm install -g factlens
 factlens --help
 ```
 
-It is one package, not separate SDK and CLI packages.
+## Credentials
 
-## Get credentials
-
-Open the FactLens developer dashboard:
-
-`https://api.factlens.pro/dashboard`
-
-For runtime verification:
-
-1. Sign in.
-2. Create or select a project.
-3. Create a project API key.
-4. Copy the secret immediately; it is shown once.
-5. Store it as `FACTLENS_API_KEY` or save it with `factlens configure`.
-
-For account-management operations, also create a developer token and store it as `FACTLENS_DEVELOPER_TOKEN` or save it with the CLI.
-
-Project API keys and developer tokens are deliberately separate credentials:
+Open `https://api.factlens.pro/dashboard`.
 
 | Credential | Used for |
 |---|---|
 | Project API key | Verify and runtime usage |
-| Developer token | Account, projects, keys, account usage, logs, request inspection |
+| Developer token | Account, projects, keys, key customization, logs, request inspection |
 
-Environment variables override saved CLI configuration.
-
-## CLI quick start
+The SDK reads these environment variables automatically:
 
 ```bash
-factlens configure
-factlens doctor
-factlens verify "The Eiffel Tower is in Paris."
+FACTLENS_API_KEY=fl_live_YOUR_KEY
+FACTLENS_DEVELOPER_TOKEN=fldev_live_YOUR_TOKEN
 ```
 
-Non-interactive configuration is also supported:
-
-```bash
-factlens configure \
-  --api-key fl_live_YOUR_KEY \
-  --developer-token fldev_live_YOUR_TOKEN
-```
-
-For CI and servers, prefer environment variables:
-
-```bash
-export FACTLENS_API_KEY=fl_live_YOUR_KEY
-export FACTLENS_DEVELOPER_TOKEN=fldev_live_YOUR_TOKEN
-```
-
-On Windows CMD:
-
-```cmd
-set FACTLENS_API_KEY=fl_live_YOUR_KEY
-set FACTLENS_DEVELOPER_TOKEN=fldev_live_YOUR_TOKEN
-```
-
-### Verify text
-
-```bash
-factlens verify "Earth orbits the Sun."
-```
-
-Or with a local package install:
-
-```bash
-npx factlens verify "Earth orbits the Sun."
-```
-
-### Verify an image or post
-
-```bash
-factlens verify --image screenshot.png --claim "This image was taken in London."
-```
-
-Supported image inputs are PNG, JPEG, WebP, and GIF.
-
-### Verify audio or video content
-
-```bash
-factlens verify --audio interview.mp3
-factlens verify --audio clip.m4a --speaker "Jane Doe"
-factlens list
-factlens kill REQUEST_ID
-```
-
-The CLI streams local audio into **Verify** and shows an animated progress bar while it runs. `factlens list` shows active local jobs and concurrency, and `factlens kill <request-id>` or `factlens kill all` stops them. FactLens transcribes media internally; there is no standalone transcription command. Audio is limited to 3 hours and costs one API credit per 10 minutes or part thereof.
-
-### Verify a text file
-
-```bash
-factlens verify --file claim.txt
-```
-
-### JSON output
-
-```bash
-factlens verify "Earth orbits the Sun." --json
-```
-
-JSON mode is designed for scripts and CI. Successful data is written to stdout; structured errors are written to stderr.
-
-### Request controls
-
-```bash
-factlens verify "A claim" \
-  --timeout 90000 \
-  --retries 2 \
-  --request-id 01914f52-79f6-4d4f-b456-426614174000
-```
-
-### Runtime usage
-
-```bash
-factlens usage
-```
-
-### Configuration and diagnostics
+The CLI can store them in the operating-system user configuration directory:
 
 ```bash
 factlens configure
 factlens config show
-factlens config clear
-factlens doctor
 ```
 
-`config show` masks secrets. Saved configuration lives in the operating-system user configuration directory, not in your project directory.
+`config show` masks secrets. Environment variables override saved CLI credentials.
 
-### Management commands
+## CLI
+
+### Text verification
+
+```bash
+factlens verify "The Eiffel Tower is in Paris."
+factlens verify --file claim.txt
+```
+
+A passage may contain multiple claims. Human output renders every successful claim separately and reports `failed_claims` independently when only part of a multi-claim request fails.
+
+### Image/post verification
+
+```bash
+factlens verify --image screenshot.png
+factlens verify --image screenshot.webp --claim "Optional focus or guidance"
+```
+
+Supported image files are PNG, JPEG, WebP, HEIC, and HEIF. The image claim is optional because FactLens can isolate the primary checkable claim from the image itself.
+
+### Audio/video and transcripts
+
+```bash
+factlens verify --audio interview.mp3
+factlens verify --audio clip.m4a --speaker "Jane Doe" --language auto
+factlens verify --audio-url https://example.com/interview.mp3
+factlens verify --transcript "Transcript text"
+factlens verify --transcript-file transcript.txt
+```
+
+The CLI streams local audio through FactLens's resumable upload path. Audio is limited to **3 hours** and is billed at one API credit per **10 minutes** or part thereof. Direct transcript input includes the first **100,000 transcript characters** in the normal one-credit charge and then adds one credit for each additional **30,000 transcript characters** or part thereof.
+
+### Forward-only progress
+
+Interactive terminals use the v6.5.0 animated forward phase rail. It never runs backward:
+
+```text
+FactLens  TEXT    1.842s   [✓] Sent  ━━━  [◐] Verifying  ━━━  [ ] Result
+```
+
+Completed phases stay green, the active spinner/rail stays cyan, waiting/retry states use warning colors, and the final verdict uses the exact API-provided `verdictColor`. Audio upload uses a real byte-derived percentage because the resumable uploader knows the acknowledged offset; text and image verification deliberately do not invent percentages.
+
+When stdout is not a TTY, FactLens avoids animation frames. `--json` remains clean for automation. `NO_COLOR` disables ANSI color.
+
+Local jobs:
+
+```bash
+factlens list
+factlens kill REQUEST_ID
+factlens kill all
+```
+
+### Source preferences and advanced Verify controls
+
+Trusted and blocked domains can be saved as defaults for each API key. A request that omits a list uses the saved list. Supplying a list **overrides the matching saved list for that request only**. An **explicit empty array** in the SDK, or the matching CLI `--no-*` flag, temporarily clears that saved list without rewriting dashboard configuration. Blocked domains win if a domain is present in both lists.
+
+```bash
+factlens verify "A claim" \
+  --trusted-domains reuters.com,apnews.com \
+  --blocked-domains example.com \
+  --instructions "Prefer direct primary evidence." \
+  --search-query "custom research query" \
+  --results-per-search 10
+```
+
+Explicitly ignore saved lists for one request:
+
+```bash
+factlens verify "A claim" --no-trusted-domains --no-blocked-domains
+```
+
+Request-scoped verdict definitions, including colors, can be supplied from JSON:
+
+```json
+[
+  {
+    "id": "custom:11111111-1111-4111-8111-111111111111",
+    "name": "CONFIRMED",
+    "color": "#16a34a",
+    "rule": "Choose when the supplied evidence directly establishes the claim."
+  }
+]
+```
+
+```bash
+factlens verify "A claim" --verdicts-file verdicts.json
+```
+
+### Timing
+
+The old millisecond option remains backward compatible:
+
+```bash
+factlens verify "A claim" --timeout 90000
+```
+
+v6.5.0 also accepts seconds:
+
+```bash
+factlens verify "A claim" --timeout-seconds 90
+```
+
+Do not pass both timeout forms together. Human output can choose its display unit:
+
+```bash
+factlens verify "A claim" --time-unit auto
+factlens verify "A claim" --time-unit ms
+factlens verify "A claim" --time-unit s
+```
+
+Final timing distinguishes **total client wall time** from the server's `response_time_ms`, so local file preparation/audio upload is no longer mistaken for server pipeline time.
+
+### Output modes
+
+```bash
+factlens verify "A claim" --quiet
+factlens verify "A claim" --verbose
+factlens verify "A claim" --json
+```
+
+- `--quiet`: verdict IDs only.
+- default: readable claim/verdict/evidence/source summary.
+- `--verbose`: full source URLs and diagnostics.
+- `--json`: unmodified machine-readable API response.
+
+If the API returns `verdictColor`, human output uses that exact `#RRGGBB` color. With ANSI disabled, the hex value remains visible.
+
+### Management and API-key customization
 
 Management commands require a developer token:
 
 ```bash
 factlens account
-
 factlens projects list
 factlens projects create "Production"
 factlens projects update PROJECT_ID "Production API"
@@ -182,13 +204,41 @@ factlens logs --limit 50 --endpoint verify
 factlens request REQUEST_ID
 ```
 
-Use `--project PROJECT_ID` to override the selected management project for project-scoped commands. Destructive actions require `--yes`.
+v6.5.0 also exposes the API-key customization contract through the public developer-token management API:
 
-A newly created project API key is shown once. Store it immediately.
+```bash
+factlens keys customization get KEY_ID --project PROJECT_ID
 
-## SDK quick start
+factlens keys customization preferences KEY_ID \
+  --project PROJECT_ID \
+  --trusted-domains reuters.com,apnews.com \
+  --blocked-domains example.com
 
-The SDK automatically reads `FACTLENS_API_KEY` and `FACTLENS_DEVELOPER_TOKEN` in Node.js.
+factlens keys customization prompt save KEY_ID \
+  --project PROJECT_ID \
+  --mode text \
+  --stage claim_extraction \
+  --instruction-file claim-prompt.txt \
+  --input-budget 8000 \
+  --prompt-mode guided
+
+factlens keys customization prompt reset KEY_ID \
+  --project PROJECT_ID \
+  --mode text \
+  --stage claim_extraction
+
+factlens keys customization verdicts save KEY_ID \
+  --project PROJECT_ID \
+  --file verdict-config.json
+
+factlens keys customization verdicts reset KEY_ID \
+  --project PROJECT_ID \
+  --yes
+```
+
+Customization modes are `text`, `audio`, and `image`. Saved prompt budgets are stage-specific: default **8,000**, minimum 2,000, maximum 20,000, in 100-token increments.
+
+## SDK
 
 ```ts
 import FactLens from "factlens";
@@ -201,11 +251,12 @@ const result = await factlens.verify({
 });
 
 console.log(result.verdictId);
+console.log(result.verdictColor);
 console.log(result.explanation);
 console.log(result.sources);
 ```
 
-You can also pass credentials explicitly:
+Pass credentials explicitly if preferred:
 
 ```ts
 const factlens = new FactLens({
@@ -214,75 +265,133 @@ const factlens = new FactLens({
 });
 ```
 
-### Verify text
+### Verify inputs
+
+Text:
 
 ```ts
 const result = await factlens.verify({
   mode: "text",
-  claim: "Earth orbits the Sun.",
+  text: "A passage containing one or more factual claims.",
+  trusted_domains: ["reuters.com"],
+  blocked_domains: [],
+  instructions: "Prefer primary sources.",
+  search_query: "optional query override",
+  results_per_search: 10,
 });
 ```
 
-### Verify an image or post
+Image/post:
 
 ```ts
 const result = await factlens.verify({
   mode: "image_post",
-  claim: "This screenshot is from the stated event.",
   image_base64: imageBase64,
   content_type: "image/png",
 });
 ```
 
-### Verify audio or video
+Audio/video or an existing transcript:
 
 ```ts
-const result = await factlens.verify({
+const mediaResult = await factlens.verify({
   mode: "audio_video",
   audio_url: "https://example.com/interview.mp3",
   speaker: "Jane Doe",
+  language: "auto",
 });
 
-console.log(result.transcript);
-console.log(result.verdictId);
-```
-
-For long form SDK requests, use `audio_url`. Inline `audio_base64` remains available for smaller media. If you already have a transcript, send it through Verify instead of uploading audio. The first 100,000 transcript characters use the normal one credit charge; each additional 30,000 characters or part thereof adds one credit:
-
-```ts
-await factlens.verify({
+const transcriptResult = await factlens.verify({
   mode: "audio_video",
   transcript: existingTranscript,
-  claim: "Optional specific claim to verify",
 });
 ```
 
-### Source preferences
-
-Trusted and blocked domains can be saved as defaults for each API key in the developer dashboard. When a verification request omits one of those lists, FactLens uses that API key's saved list. Supplying `trusted_domains` or `blocked_domains` in the SDK or CLI overrides the matching saved list for that request only. An explicit empty array in the SDK clears the matching saved default for that request. Trusted domains are prioritized when matching evidence is available. Blocked domains are excluded and take precedence if a domain appears in both lists. Request overrides do not rewrite the defaults saved in the dashboard.
-
-SDK:
+### Request-scoped verdict colors
 
 ```ts
-await factlens.verify({
+const result = await factlens.verify({
   mode: "text",
-  claim: "A claim to verify",
-  trusted_domains: ["reuters.com", "apnews.com"],
-  blocked_domains: ["example.com"],
+  claim: "A claim",
+  verdicts: [
+    {
+      id: "custom:11111111-1111-4111-8111-111111111111",
+      name: "CONFIRMED",
+      color: "#16a34a",
+      rule: "Choose when the supplied evidence directly establishes the claim.",
+    },
+  ],
+});
+
+console.log(result.verdictId);
+console.log(result.verdictColor);
+```
+
+For multi-claim responses, `result.results` contains independently verified results and each result can include its own `verdictColor`. `result.failed_claims` contains per-claim failures when other claims still succeed.
+
+### Manage saved key customization
+
+The SDK uses the developer token and the same per-key storage/contracts as the FactLens dashboard:
+
+```ts
+factlens.projects.select("PROJECT_ID");
+
+const state = await factlens.keys.customization.get({
+  keyId: "KEY_ID",
+});
+
+await factlens.keys.customization.updatePreferences({
+  keyId: "KEY_ID",
+  trustedDomains: ["reuters.com", "apnews.com"],
+  blockedDomains: ["example.com"],
+});
+
+await factlens.keys.customization.savePrompt({
+  keyId: "KEY_ID",
+  mode: "text",
+  stage: "claim_extraction",
+  instruction: "Extract only explicit, complete claims.",
+  inputBudgetTokens: 8000,
+  promptMode: "guided",
+  enabled: true,
+});
+
+await factlens.keys.customization.saveVerdicts({
+  keyId: "KEY_ID",
+  config: verdictConfigV3,
 });
 ```
 
-CLI:
-
-```bash
-factlens verify "A claim to verify" --trusted-domains reuters.com,apnews.com --blocked-domains example.com
-```
-
-### Runtime usage
+Reset methods delete only the selected key's saved customization:
 
 ```ts
-const usage = await factlens.usage.get();
+await factlens.keys.customization.resetPrompt({
+  keyId: "KEY_ID",
+  mode: "text",
+  stage: "claim_extraction",
+});
+
+await factlens.keys.customization.resetVerdicts({ keyId: "KEY_ID" });
 ```
+
+### Request control and timing
+
+```ts
+await factlens.verify(
+  { mode: "text", claim: "..." },
+  {
+    timeoutSeconds: 90,
+    maxRetries: 2,
+    onProgress(progress) {
+      console.log(progress.state, progress.elapsedMs, progress.elapsedSeconds);
+    },
+  },
+);
+```
+
+`timeout` remains milliseconds. `timeoutSeconds` is the seconds alternative. Supplying both is a configuration error. Progress timing uses a monotonic clock, so wall-clock adjustments cannot make elapsed time run backward.
+
+Verify automatically receives an `X-Request-ID` when one is not supplied. Automatic retries and `REQUEST_IN_PROGRESS` polling reuse it so an idempotent request is not executed twice.
 
 ## SDK management
 
@@ -301,43 +410,9 @@ const logs = await factlens.logs.list({ limit: 50 });
 const request = await factlens.logs.get("REQUEST_ID");
 ```
 
-`projects.select()` only changes the default project for management calls. Runtime project identity is bound to the project API key by the server.
-
-To use another project's runtime key, create another client:
-
-```ts
-const staging = factlens.withApiKey(process.env.FACTLENS_STAGING_API_KEY!);
-await staging.verify({ mode: "text", claim: "..." });
-```
-
-## Request control
-
-SDK requests support timeout, cancellation, request IDs, bounded retries, and progress callbacks:
-
-```ts
-import { randomUUID } from "node:crypto";
-
-const controller = new AbortController();
-
-await factlens.verify(
-  { mode: "text", claim: "..." },
-  {
-    signal: controller.signal,
-    timeout: 90_000,
-    requestId: randomUUID(),
-    maxRetries: 2,
-    onProgress(progress) {
-      console.log(progress.state, progress.elapsedMs);
-    },
-  },
-);
-```
-
-Verify automatically receives an `X-Request-ID` when you do not provide one. Automatic retries and `REQUEST_IN_PROGRESS` polling within one invocation reuse that request ID so an in-progress or completed idempotent request is not executed twice.
+`projects.select()` changes only the default project for management calls. Runtime project identity remains bound to the project API key.
 
 ## Errors
-
-FactLens errors are structured and actionable.
 
 ```ts
 import FactLens, { FactLensError } from "factlens";
@@ -357,21 +432,17 @@ try {
 }
 ```
 
-Credential errors direct developers to `https://api.factlens.pro/dashboard` to create or copy the correct credential.
-
-`409 REQUEST_IN_PROGRESS` is not surfaced as a terminal error while the configured request timeout remains. The SDK keeps the same request ID, follows the server's `Retry-After` guidance, and continues polling. Ordinary validation, authentication, quota, billing, ownership, and request-ID conflict errors are not retried. Retryable network errors, `408`, `429`, and retryable `5xx` responses use the bounded retry budget.
+`409 REQUEST_IN_PROGRESS` remains recoverable within the configured timeout. Ordinary validation/authentication/quota/billing/ownership/request-ID-conflict errors are not retried. Retryable network errors, `408`, `429`, and retryable `5xx` responses use the bounded retry budget.
 
 See [Errors and retries](docs/errors-and-retries.md).
 
 ## Browser safety
 
-FactLens credentials are secrets. The SDK refuses to initialize with secret credentials in a browser-like environment by default.
+Secret API keys and developer tokens belong on the server. The SDK refuses secret credentials in browser-like environments by default. `dangerouslyAllowBrowser: true` is an explicit escape hatch and should not be used with production secrets.
 
-`dangerouslyAllowBrowser: true` exists only as an explicit escape hatch for environments where you fully control the credential exposure. It should not be used with production secrets.
+## Usage and limits
 
-## Limits
-
-Current developer-account limits are account-wide. Eligible free accounts receive 30 shared requests per UTC day. Paid API credits use the current rate: **$1 funds 30 API checks**.
+Eligible free accounts receive 30 shared requests per UTC day. Paid API credits use the current rate: **$1 funds 30 API checks**.
 
 | | Free | Paid |
 |---|---:|---:|
@@ -381,11 +452,7 @@ Current developer-account limits are account-wide. Eligible free accounts receiv
 | Throughput | 20/min shared | 60/min shared |
 | Purchased balance | — | Shared across all projects |
 
-Media verification is metered by the request. Audio is limited to 3 hours and costs one API credit per 10 minutes or part thereof. Direct transcript input includes the first 100,000 characters in the normal one credit charge, then adds one credit for each additional 30,000 characters or part thereof.
-
-Existing unused paid balances are migrated by the FactLens API backend to the current request-credit scale. The SDK reads the resulting account balance from the API and does not perform local conversion.
-
-Keys, logs, requests, and metrics remain project-attributed.
+Keys, logs, requests, and metrics remain project-attributed. Existing unused paid balances are migrated by the API backend; the SDK reads the resulting request-credit balance and does not perform local money conversion.
 
 See [Usage and limits](docs/usage-and-limits.md).
 
@@ -403,7 +470,7 @@ See [Usage and limits](docs/usage-and-limits.md).
 
 ## Security
 
-See [SECURITY.md](SECURITY.md). Do not open public issues containing live API keys, developer tokens, or sensitive request payloads.
+See [SECURITY.md](SECURITY.md). Never put live API keys, developer tokens, or sensitive request payloads in public issues.
 
 ## License
 
