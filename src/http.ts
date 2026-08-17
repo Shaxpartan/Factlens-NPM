@@ -3,13 +3,12 @@ import { FactLensConfigurationError, FactLensError, isRetryableStatus } from "./
 import type { VerificationStage } from "./errors.js";
 import type { RequestOptions } from "./types/index.js";
 
-export const SDK_VERSION = "6.1.0";
+export const SDK_VERSION = "6.5.0";
 export const FACTLENS_DASHBOARD_URL = "https://api.factlens.pro/dashboard";
 
 const RUNTIME_VERIFY_RECONNECT_WINDOW_MS = 23_000;
 
 type AuthKind = "runtime" | "management";
-
 type TransportConfig = {
   apiKey?: string;
   developerToken?: string;
@@ -20,7 +19,7 @@ type TransportConfig = {
 };
 
 type TransportRequest = {
-  method: "GET" | "POST" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   auth: AuthKind;
   body?: unknown;
   options?: RequestOptions;
@@ -70,21 +69,26 @@ export class HttpTransport {
 
     const options = request.options ?? {};
     const maxRetries = boundedInteger(options.maxRetries, 2, 0, 5);
-    const timeout = boundedInteger(options.timeout, request.timeout, 1, 1_800_000);
-    const startedAt = Date.now();
+    const timeout = resolveTimeout(options, request.timeout);
+    const startedAt = monotonicNow();
     const deadline = startedAt + timeout;
     const requestId = resolveRequestId(options.requestId, Boolean(request.automaticRequestId));
-    const progress = (state: "sending" | "waiting" | "transcribing" | "retrying" | "complete") => { try { options.onProgress?.({ state, elapsedMs: Math.max(0, Date.now() - startedAt), ...(requestId ? { requestId } : {}), attempt }); } catch {} };
+    let attempt = 0;
+    const progress = (state: "sending" | "waiting" | "transcribing" | "retrying" | "complete") => {
+      try {
+        const elapsedMs = Math.max(0, monotonicNow() - startedAt);
+        options.onProgress?.({ state, elapsedMs, elapsedSeconds: elapsedMs / 1000, ...(requestId ? { requestId } : {}), attempt });
+      } catch {}
+    };
     const baseUrl = request.auth === "runtime" ? this.runtimeBaseUrl : this.managementBaseUrl;
     const reconnectVerify = request.auth === "runtime"
       && request.method === "POST"
       && path === "/v1/verify"
       && Boolean(requestId)
       && isFactLensProxyRuntime(baseUrl);
-    let attempt = 0;
 
     while (true) {
-      const remaining = deadline - Date.now();
+      const remaining = deadline - monotonicNow();
       if (remaining <= 0) throw timeoutError(requestId);
 
       const transportWindow = reconnectVerify
@@ -132,7 +136,7 @@ export class HttpTransport {
           });
         }
         if (controller.signal.aborted) {
-          if (reconnectOnWindowExpiry && Date.now() < deadline) { progress("waiting"); continue; }
+          if (reconnectOnWindowExpiry && monotonicNow() < deadline) { progress("waiting"); continue; }
           throw timeoutError(requestId, controller.signal.reason ?? cause);
         }
         if (attempt < maxRetries) {
@@ -164,15 +168,13 @@ export class HttpTransport {
       if (response.status === 409 && code === "REQUEST_IN_PROGRESS" && requestId) {
         progress(textValue(errorBody.stage) === "transcription" ? "transcribing" : "waiting");
         const wait = retryDelay(response.headers.get("retry-after"), 0);
-        const left = deadline - Date.now();
+        const left = deadline - monotonicNow();
         if (left <= 0) throw timeoutError(requestId);
         await delay(Math.min(wait, left));
         continue;
       }
 
-      const retryable = response.status === 409
-        ? false
-        : isRetryableStatus(response.status);
+      const retryable = response.status === 409 ? false : isRetryableStatus(response.status);
 
       if (retryable && attempt < maxRetries) {
         progress("retrying");
@@ -230,11 +232,27 @@ function boundedInteger(value: number | undefined, fallback: number, minimum: nu
   return Math.min(maximum, Math.max(minimum, Math.floor(number)));
 }
 
+function resolveTimeout(options: RequestOptions, fallback: number) {
+  if (options.timeout !== undefined && options.timeoutSeconds !== undefined) {
+    throw new FactLensConfigurationError("Pass either timeout (milliseconds) or timeoutSeconds, not both.");
+  }
+  if (options.timeoutSeconds !== undefined) {
+    const seconds = Number(options.timeoutSeconds);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      throw new FactLensConfigurationError("timeoutSeconds must be a positive number.");
+    }
+    return Math.min(1_800_000, Math.max(1, Math.round(seconds * 1000)));
+  }
+  return boundedInteger(options.timeout, fallback, 1, 1_800_000);
+}
+
+function monotonicNow() {
+  return typeof globalThis.performance?.now === "function" ? globalThis.performance.now() : Date.now();
+}
+
 function resolveRequestId(value: string | undefined, automatic: boolean) {
   if (value !== undefined) {
-    if (!uuidPattern.test(value)) {
-      throw new FactLensConfigurationError("requestId must be a UUID.");
-    }
+    if (!uuidPattern.test(value)) throw new FactLensConfigurationError("requestId must be a UUID.");
     return value;
   }
   return automatic ? randomUUID() : undefined;
