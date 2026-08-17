@@ -1,89 +1,62 @@
-import { randomUUID } from "node:crypto";
-import { FactLensConfigurationError, FactLensError, isRetryableStatus } from "./errors.js";
+import { FactLensError } from "./errors.js";
 import { buildResponseMeta } from "./runtime/response-meta.js";
-import type { ResponseMeta } from "./runtime/response-meta.js";
-import type { VerificationStage } from "./errors.js";
-import type { RequestOptions } from "./types/index.js";
+import type { DetailedResponse, FactLensResponseMeta } from "./runtime/response-meta.js";
+import type { RequestOptions, VerifyProgress } from "./types/index.js";
 
-export const SDK_VERSION = "6.7.0";
-export const FACTLENS_DASHBOARD_URL = "https://api.factlens.pro/dashboard";
+export type HttpAuth = "runtime" | "management" | "none";
 
-const RUNTIME_VERIFY_RECONNECT_WINDOW_MS = 23_000;
+export type HttpRequest = {
+  method: "GET" | "POST" | "PATCH" | "DELETE";
+  auth: HttpAuth;
+  body?: unknown;
+  headers?: HeadersInit;
+  timeout?: number;
+  options?: RequestOptions;
+};
 
-type AuthKind = "runtime" | "management";
-type TransportConfig = {
+export type HttpTransportOptions = {
+  baseUrl: string;
   apiKey?: string;
   developerToken?: string;
-  baseUrl: string;
-  runtimeBaseUrl?: string;
-  managementBaseUrl?: string;
   fetch: typeof globalThis.fetch;
+  sdkVersion: string;
+  sdkName: string;
+  userAgent?: string;
 };
 
-type TransportRequest = {
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  auth: AuthKind;
-  body?: unknown;
-  options?: RequestOptions;
-  timeout: number;
-  automaticRequestId?: boolean;
-};
-
-export type DetailedTransportResponse<T> = { data: T; meta: ResponseMeta };
-
-type ErrorBody = {
-  error?: unknown;
-  message?: unknown;
-  request_id?: unknown;
-  details?: unknown;
-  stage?: unknown;
-  help_url?: unknown;
-};
-
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const stages = new Set<VerificationStage>(["transcription", "search", "analysis", "moderation", "verification"]);
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 export class HttpTransport {
+  private readonly baseUrl: string;
   private readonly apiKey: string | undefined;
   private readonly developerToken: string | undefined;
-  private readonly runtimeBaseUrl: string;
-  private readonly managementBaseUrl: string;
-  private readonly fetch: typeof globalThis.fetch;
+  private readonly fetchImpl: typeof globalThis.fetch;
+  private readonly sdkVersion: string;
+  private readonly sdkName: string;
+  private readonly userAgent: string | undefined;
 
-  constructor(config: TransportConfig) {
-    this.apiKey = cleanCredential(config.apiKey);
-    this.developerToken = cleanCredential(config.developerToken);
-    const shared = normalizeBaseUrl(config.baseUrl);
-    this.runtimeBaseUrl = normalizeBaseUrl(config.runtimeBaseUrl ?? shared);
-    this.managementBaseUrl = normalizeBaseUrl(config.managementBaseUrl ?? shared);
-    this.fetch = config.fetch;
+  constructor(options: HttpTransportOptions) {
+    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.apiKey = cleanCredential(options.apiKey);
+    this.developerToken = cleanCredential(options.developerToken);
+    this.fetchImpl = options.fetch;
+    this.sdkVersion = options.sdkVersion;
+    this.sdkName = options.sdkName;
+    this.userAgent = options.userAgent;
   }
 
-  async request<T>(path: string, request: TransportRequest): Promise<T> {
-    return (await this.requestDetailed<T>(path, request)).data;
+  request<T>(path: string, request: HttpRequest): Promise<T> {
+    return this.requestDetailed<T>(path, request).then((response) => response.data);
   }
 
-  async requestDetailed<T>(path: string, request: TransportRequest): Promise<DetailedTransportResponse<T>> {
-    const token = request.auth === "runtime" ? this.apiKey : this.developerToken;
-    if (!token) {
-      const runtime = request.auth === "runtime";
-      throw new FactLensConfigurationError(
-        runtime
-          ? `A FactLens project API key is required. Create or copy one at ${FACTLENS_DASHBOARD_URL}, then set FACTLENS_API_KEY or run factlens configure.`
-          : `A FactLens developer token is required. Create one at ${FACTLENS_DASHBOARD_URL}, then set FACTLENS_DEVELOPER_TOKEN or run factlens configure.`,
-        { helpUrl: FACTLENS_DASHBOARD_URL },
-      );
-    }
-
+  async requestDetailed<T>(path: string, request: HttpRequest): Promise<DetailedResponse<T>> {
     const options = request.options ?? {};
-    const readOnly = request.method === "GET";
+    const timeoutMs = options.timeout ?? request.timeout ?? DEFAULT_TIMEOUT_MS;
     const runtimeVerify = request.auth === "runtime" && request.method === "POST" && path === "/v1/verify";
-    const defaultRetries = readOnly ? 1 : 0;
-    const maxRetries = boundedInteger(options.maxRetries, defaultRetries, 0, readOnly ? 5 : 0);
-    const timeout = resolveTimeout(options, request.timeout);
+    const readOnly = request.method === "GET";
+    const maxRetries = runtimeVerify || !readOnly ? 0 : Math.max(0, Math.floor(options.maxRetries ?? 1));
+    const requestId = runtimeVerify ? cleanRequestId(options.requestId) ?? crypto.randomUUID() : cleanRequestId(options.requestId);
     const startedAt = monotonicNow();
-    const deadline = startedAt + timeout;
-    const requestId = resolveRequestId(options.requestId, Boolean(request.automaticRequestId));
     let attempt = 0;
     let pollCount = 0;
     let progressState: string | undefined;
@@ -94,114 +67,97 @@ export class HttpTransport {
         if (progressState !== state) { progressState = state; phaseStartedAt = now; }
         const elapsedMs = Math.max(0, now - startedAt);
         const phase = state === "transcribing" ? "transcription" : state === "sending" || state === "retrying" ? "verifying" : state;
-        options.onProgress?.({ state, phase, elapsedMs, elapsedSeconds: elapsedMs / 1000, phaseElapsedMs: Math.max(0, now - phaseStartedAt), pollCount, ...(requestId ? { requestId } : {}), attempt, ...extras });
+        options.onProgress?.({ state, phase, elapsedMs, elapsedSeconds: elapsedMs / 1000, phaseElapsedMs: Math.max(0, now - phaseStartedAt), pollCount, ...(requestId ? { requestId } : {}), attempt, ...extras } as VerifyProgress);
       } catch {}
     };
-    const baseUrl = request.auth === "runtime" ? this.runtimeBaseUrl : this.managementBaseUrl;
-    const reconnectVerify = runtimeVerify && Boolean(requestId) && isFactLensProxyRuntime(baseUrl);
 
     while (true) {
-      const remaining = deadline - monotonicNow();
-      if (remaining <= 0) throw timeoutError(requestId);
+      const headers = new Headers(request.headers);
+      headers.set("accept", "application/json");
+      headers.set("x-factlens-sdk", this.sdkName);
+      headers.set("x-factlens-sdk-version", this.sdkVersion);
+      if (this.userAgent) headers.set("user-agent", this.userAgent);
+      if (request.body !== undefined) headers.set("content-type", "application/json");
+      if (requestId) headers.set("x-request-id", requestId);
+      if (request.auth === "runtime") {
+        if (!this.apiKey) throw configurationError("apiKey");
+        headers.set("authorization", `Bearer ${this.apiKey}`);
+      } else if (request.auth === "management") {
+        if (!this.developerToken) throw configurationError("developerToken");
+        headers.set("authorization", `Bearer ${this.developerToken}`);
+      }
 
-      const transportWindow = reconnectVerify
-        ? Math.min(remaining, RUNTIME_VERIFY_RECONNECT_WINDOW_MS)
-        : remaining;
-      const reconnectOnWindowExpiry = reconnectVerify && remaining > RUNTIME_VERIFY_RECONNECT_WINDOW_MS;
-      const controller = new AbortController();
-      const forwardAbort = () => controller.abort(options.signal?.reason);
-      if (options.signal?.aborted) forwardAbort();
-      else options.signal?.addEventListener("abort", forwardAbort, { once: true });
-      const timeoutReason = new DOMException(
-        reconnectOnWindowExpiry
-          ? "The FactLens transport reconnect window elapsed."
-          : "The FactLens request timed out.",
-        "TimeoutError",
-      );
-      const timer = setTimeout(() => controller.abort(timeoutReason), transportWindow);
-
-      const headers = new Headers({
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-        "X-FactLens-SDK": "node",
-        "X-FactLens-SDK-Version": SDK_VERSION,
-      });
-      if (request.body !== undefined) headers.set("Content-Type", "application/json");
-      if (requestId) headers.set("X-Request-ID", requestId);
-
-      let response: Response;
       progress(attempt > 0 ? "retrying" : "sending");
+      const composed = composeAbort(options.signal, timeoutMs);
+      let response: Response;
       try {
-        response = await this.fetch(`${baseUrl}${path}`, {
+        response = await this.fetchImpl(`${this.baseUrl}${path}`, {
           method: request.method,
           headers,
           ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
-          signal: controller.signal,
+          signal: composed.signal,
         });
-      } catch (cause) {
+      } catch (error) {
+        composed.cleanup();
         if (options.signal?.aborted) {
-          throw new FactLensError("The FactLens request was aborted.", {
+          throw new FactLensError("The request was cancelled.", {
             status: 0,
             code: "REQUEST_ABORTED",
-            requestId,
             retryable: false,
-            cause: options.signal.reason ?? cause,
+            cause: error,
           });
         }
-        if (controller.signal.aborted) {
-          if (reconnectOnWindowExpiry && monotonicNow() < deadline) { progress("waiting"); continue; }
-          throw timeoutError(requestId, controller.signal.reason ?? cause);
+        if (composed.timedOut()) {
+          throw new FactLensError(`The request timed out after ${timeoutMs} ms.`, {
+            status: 0,
+            code: "REQUEST_TIMEOUT",
+            retryable: true,
+            cause: error,
+          });
         }
-        if (attempt < maxRetries) {
-          await delay(backoff(attempt));
+        if (readOnly && attempt < maxRetries) {
+          progress("retrying");
+          await delay(retryDelay(null, attempt));
           attempt += 1;
           continue;
         }
-        throw new FactLensError("FactLens API could not be reached. Check your network connection and the configured API URL.", {
+        throw new FactLensError("The request could not reach FactLens.", {
           status: 0,
           code: "NETWORK_ERROR",
-          requestId,
-          retryable: readOnly || Boolean(runtimeVerify && requestId),
-          cause,
+          retryable: readOnly,
+          cause: error,
         });
       } finally {
-        clearTimeout(timer);
-        options.signal?.removeEventListener("abort", forwardAbort);
+        composed.cleanup();
       }
 
-      const body = await responseBody(response);
+      const responseBody = await responseJson(response);
+      const effectiveRequestId = cleanRequestId(response.headers.get("x-factlens-request-id")) ?? cleanRequestId(recordValue(responseBody, "request_id")) ?? requestId;
       if (response.ok) {
-        progress("complete");
+        const data = responseBody as T;
         const meta = buildResponseMeta({
           headers: response.headers,
           clientTotalMs: Math.max(0, monotonicNow() - startedAt),
           status: response.status,
           retryCount: attempt,
         });
-        if (!meta.requestId && requestId) meta.requestId = requestId;
-        return { data: body as T, meta };
+        progress("complete");
+        return { data, meta };
       }
 
-      const errorBody = isRecord(body) ? body as ErrorBody : {};
-      const code = textValue(errorBody.error) || `HTTP_${response.status}`;
-      const effectiveRequestId = textValue(errorBody.request_id)
-        || response.headers.get("x-factlens-request-id")
-        || requestId;
-
+      const errorBody = recordValue(responseBody);
+      const code = textValue(errorBody.error) || textValue(errorBody.code) || `HTTP_${response.status}`;
       if (response.status === 409 && code === "REQUEST_IN_PROGRESS" && requestId) {
         const wait = retryDelay(response.headers.get("retry-after"), 0);
         pollCount += 1;
         progress(textValue(errorBody.stage) === "transcription" ? "transcribing" : "waiting", { nextPollInMs: wait });
-        const left = deadline - monotonicNow();
-        if (left <= 0) throw timeoutError(requestId);
-        await delay(Math.min(wait, left));
+        await delay(wait);
+        attempt += 1;
         continue;
       }
 
-      const retryableStatus = response.status !== 409 && isRetryableStatus(response.status);
-      const autoRetry = readOnly && retryableStatus;
-
-      if (autoRetry && attempt < maxRetries) {
+      const retryableStatus = isRetryableStatus(response.status);
+      if (readOnly && retryableStatus && attempt < maxRetries) {
         progress("retrying");
         await delay(retryDelay(response.headers.get("retry-after"), attempt));
         attempt += 1;
@@ -223,7 +179,7 @@ export class HttpTransport {
         code,
         requestId: effectiveRequestId,
         retryable: retryableStatus && (readOnly || runtimeVerify),
-        retryAfterMs: responseMeta.retryAfterMs,
+        ...(responseMeta.retryAfterMs === undefined ? {} : { retryAfterMs: responseMeta.retryAfterMs }),
         meta: responseMeta,
         headers: new Headers(response.headers),
         ...(errorBody.details === undefined ? {} : { details: errorBody.details }),
@@ -239,120 +195,98 @@ function cleanCredential(value: string | undefined) {
   return result || undefined;
 }
 
-function normalizeBaseUrl(value: string) {
-  const result = String(value ?? "").trim().replace(/\/+$/, "");
-  if (!result) throw new FactLensConfigurationError("A FactLens API base URL is required.");
-  try {
-    const url = new URL(result);
-    if (!/^https?:$/.test(url.protocol)) throw new Error("protocol");
-  } catch (cause) {
-    throw new FactLensConfigurationError("FactLens API base URLs must be valid HTTP or HTTPS URLs.", { cause });
-  }
-  return result;
+function cleanRequestId(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text || undefined;
 }
 
-function isFactLensProxyRuntime(baseUrl: string) {
-  try {
-    return new URL(baseUrl).hostname.toLowerCase() === "api.factlens.pro";
-  } catch {
-    return false;
-  }
+function configurationError(field: "apiKey" | "developerToken") {
+  return new FactLensError(
+    field === "apiKey"
+      ? "A FactLens API key is required for this operation."
+      : "A FactLens developer token is required for this operation.",
+    {
+      status: 0,
+      code: "CONFIGURATION_ERROR",
+      retryable: false,
+      helpUrl: "https://api.factlens.pro/dashboard",
+    },
+  );
 }
 
-function boundedInteger(value: number | undefined, fallback: number, minimum: number, maximum: number) {
-  const number = Number(value ?? fallback);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(maximum, Math.max(minimum, Math.floor(number)));
-}
-
-function resolveTimeout(options: RequestOptions, fallback: number) {
-  if (options.timeout !== undefined && options.timeoutSeconds !== undefined) {
-    throw new FactLensConfigurationError("Pass either timeout (milliseconds) or timeoutSeconds, not both.");
-  }
-  if (options.timeoutSeconds !== undefined) {
-    const seconds = Number(options.timeoutSeconds);
-    if (!Number.isFinite(seconds) || seconds <= 0) {
-      throw new FactLensConfigurationError("timeoutSeconds must be a positive number.");
-    }
-    return Math.min(1_800_000, Math.max(1, Math.round(seconds * 1000)));
-  }
-  return boundedInteger(options.timeout, fallback, 1, 1_800_000);
-}
-
-function monotonicNow() {
-  return typeof globalThis.performance?.now === "function" ? globalThis.performance.now() : Date.now();
-}
-
-function resolveRequestId(value: string | undefined, automatic: boolean) {
-  if (value !== undefined) {
-    if (!uuidPattern.test(value)) throw new FactLensConfigurationError("requestId must be a UUID.");
-    return value;
-  }
-  return automatic ? randomUUID() : undefined;
-}
-
-async function responseBody(response: Response): Promise<unknown> {
+async function responseJson(response: Response) {
   const text = await response.text();
-  if (!text) return undefined;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { message: text };
-  }
+  if (!text) return {};
+  try { return JSON.parse(text); }
+  catch { return { message: text }; }
 }
 
-function retryDelay(header: string | null, attempt: number) {
-  if (header !== null) {
-    const seconds = Number(header);
-    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(60_000, seconds * 1000);
-    const date = Date.parse(header);
+function recordValue(value: unknown, key?: string): any {
+  if (!value || typeof value !== "object") return key ? undefined : {};
+  return key ? (value as Record<string, unknown>)[key] : value as Record<string, unknown>;
+}
+
+function textValue(value: unknown) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text || undefined;
+}
+
+function verificationStage(value: unknown) {
+  const stage = textValue(value);
+  return stage === "transcription" || stage === "search" || stage === "analysis" || stage === "moderation" || stage === "verification"
+    ? stage
+    : undefined;
+}
+
+function isRetryableStatus(status: number) {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function retryDelay(value: string | null, attempt: number) {
+  if (value) {
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(60_000, Math.round(seconds * 1000));
+    const date = Date.parse(value);
     if (Number.isFinite(date)) return Math.min(60_000, Math.max(0, date - Date.now()));
   }
-  return backoff(attempt);
-}
-
-function backoff(attempt: number) {
-  return Math.min(5_000, 250 * (2 ** attempt)) + Math.floor(Math.random() * 101);
-}
-
-function delay(milliseconds: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
-}
-
-function timeoutError(requestId?: string, cause?: unknown) {
-  return new FactLensError("The FactLens request timed out. Retry with the same request ID to retrieve its result if it completed upstream.", {
-    status: 0,
-    code: "REQUEST_TIMEOUT",
-    requestId,
-    retryable: true,
-    ...(cause === undefined ? {} : { cause }),
-  });
+  return Math.min(5_000, 250 * (2 ** Math.max(0, attempt)));
 }
 
 function credentialHelpUrl(code: string) {
-  return ["API_KEY_INVALID", "DEVELOPER_TOKEN_INVALID", "API_PROJECT_KEY_NOT_ALLOWED"].includes(code)
-    ? FACTLENS_DASHBOARD_URL
+  return code === "API_KEY_INVALID" || code === "API_KEY_REQUIRED" || code === "DEVELOPER_TOKEN_INVALID" || code === "DEVELOPER_TOKEN_REQUIRED"
+    ? "https://api.factlens.pro/dashboard"
     : undefined;
 }
 
 function actionableMessage(code: string, message: string | undefined, helpUrl: string | undefined, status: number) {
-  const base = message || `FactLens API returned HTTP ${status}.`;
-  if (!helpUrl) return base;
-  if (code === "API_PROJECT_KEY_NOT_ALLOWED") {
-    return `${base} This operation requires a developer token. Create or copy the correct credential at ${helpUrl}.`;
-  }
-  return `${base} Create or copy a valid credential at ${helpUrl}.`;
+  const base = message || `FactLens returned HTTP ${status}.`;
+  return helpUrl ? `${base} See ${helpUrl}.` : base;
 }
 
-function verificationStage(value: unknown): VerificationStage | undefined {
-  const text = textValue(value) as VerificationStage | undefined;
-  return text && stages.has(text) ? text : undefined;
+function monotonicNow() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+function delay(ms: number) {
+  return ms <= 0 ? Promise.resolve() : new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-function textValue(value: unknown) {
-  return typeof value === "string" ? value : undefined;
+function composeAbort(signal: AbortSignal | undefined, timeoutMs: number) {
+  const controller = new AbortController();
+  let timeoutHit = false;
+  const abortFromUser = () => controller.abort(signal?.reason);
+  if (signal?.aborted) controller.abort(signal.reason);
+  else signal?.addEventListener("abort", abortFromUser, { once: true });
+  const timeout = setTimeout(() => {
+    timeoutHit = true;
+    controller.abort(new Error("FactLens request timeout"));
+  }, Math.max(1, timeoutMs));
+  return {
+    signal: controller.signal,
+    timedOut: () => timeoutHit,
+    cleanup() {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", abortFromUser);
+    },
+  };
 }
