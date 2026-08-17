@@ -72,6 +72,21 @@ const { data, meta } = await factlens.verifyDetailed({ mode: "text", claim: "Ear
 console.log(meta.serverTiming.coreMs, meta.serverTiming.edgeMs, meta.gatewayNetworkMs);
 ```
 
+## v6.7.0 runtime metadata
+
+Ordinary SDK calls remain source-compatible:
+
+```ts
+const result = await factlens.verify({ mode: "text", claim: "Earth orbits the Sun." });
+```
+
+Use the additive detailed path when you need transport/runtime diagnostics:
+
+```ts
+const { data, meta } = await factlens.verifyDetailed({ mode: "text", claim: "Earth orbits the Sun." });
+console.log(meta.serverTiming.coreMs, meta.serverTiming.edgeMs, meta.gatewayNetworkMs);
+```
+
 ## CLI
 
 ### Text verification
