@@ -13,6 +13,7 @@ export type VerifyProgressState = "sending" | "waiting" | "transcribing" | "retr
 export type VerifyProgress = {
   state: VerifyProgressState;
   elapsedMs: number;
+  elapsedSeconds: number;
   requestId?: string;
   attempt: number;
 };
@@ -20,6 +21,7 @@ export type VerifyProgress = {
 export type RequestOptions = {
   signal?: AbortSignal;
   timeout?: number;
+  timeoutSeconds?: number;
   requestId?: string;
   maxRetries?: number;
   onProgress?: (progress: VerifyProgress) => void;
@@ -48,8 +50,11 @@ export type RuntimeResponse = {
 export type VerdictInput = {
   id?: string;
   name?: string;
+  color?: string;
   rule?: string;
+  rules?: string[];
   guidance?: string;
+  enabled?: boolean;
 };
 
 export type VerifyInput = {
@@ -72,13 +77,30 @@ export type VerifyInput = {
   instructions?: string;
 };
 
+export type VerifySource = {
+  url: string;
+  title?: string;
+  [key: string]: unknown;
+};
+
 export type VerifyResult = {
   claim?: string;
   verdictId?: string;
+  verdictColor?: string;
   explanation?: string;
   confidence?: "LOW" | "MEDIUM" | "HIGH";
   evidenceStrength?: "NONE" | "WEAK" | "MODERATE" | "STRONG";
-  sources?: Array<{ url: string; title?: string; [key: string]: unknown }>;
+  sources?: VerifySource[];
+  visibleText?: string;
+  [key: string]: unknown;
+};
+
+export type VerifyClaimFailure = {
+  claim?: string;
+  error?: string;
+  stage?: "transcription" | "search" | "analysis" | "moderation" | "verification" | string;
+  message?: string;
+  [key: string]: unknown;
 };
 
 export type VerifyResponse = RuntimeResponse & VerifyResult & {
@@ -86,6 +108,8 @@ export type VerifyResponse = RuntimeResponse & VerifyResult & {
   transcript?: string | null;
   claim_count?: number;
   results?: VerifyResult[];
+  failed_claims?: VerifyClaimFailure[];
+  message?: string;
 };
 
 export type Account = {
@@ -114,6 +138,8 @@ export type ApiKey = {
   key_prefix?: string;
   last4?: string;
   enabled?: boolean;
+  trusted_domains?: string[];
+  blocked_domains?: string[];
   created_at?: string;
   last_used_at?: string | null;
   expires_at?: string | null;
@@ -132,6 +158,96 @@ export type ProjectReference = { projectId?: string };
 export type KeyListOptions = ProjectReference;
 export type KeyCreateOptions = ProjectReference & { label: string };
 export type KeyRevokeOptions = { projectId?: string; keyId: string };
+export type KeyReference = ProjectReference & { keyId: string };
+
+export type ApiCustomizationMode = "text" | "audio" | "image";
+export type ApiPromptStage = "claim_extraction" | "evidence_evaluation" | "image_extraction" | "image_evaluation" | "image_analysis";
+export type ApiPromptMode = "guided" | "exact";
+
+export type ApiKeyPromptConfig = {
+  api_key_id?: string;
+  mode: ApiCustomizationMode;
+  stage: ApiPromptStage;
+  instruction: string;
+  input_budget_tokens: number;
+  output_token_limit?: number | null;
+  enabled: boolean;
+  prompt_mode: ApiPromptMode;
+  revision?: number;
+  updated_at?: string | null;
+  [key: string]: unknown;
+};
+
+export type ApiVerdictRule = string;
+export type ApiVerdict = {
+  id: string;
+  name: string;
+  color: string;
+  rules: ApiVerdictRule[];
+  guidance?: string;
+  enabled: boolean;
+  order: number;
+};
+export type ApiVerdictModeConfig = { instruction: string; catalog: ApiVerdict[] };
+export type ApiVerdictConfig = {
+  version: 3;
+  modes: {
+    text: ApiVerdictModeConfig;
+    audio: ApiVerdictModeConfig;
+    image: ApiVerdictModeConfig;
+  };
+};
+export type ApiKeyVerdictConfigRecord = {
+  api_key_id?: string;
+  config: ApiVerdictConfig;
+  schema_version?: number;
+  contract_version?: string;
+  revision?: number;
+  updated_at?: string | null;
+  [key: string]: unknown;
+};
+
+export type ApiPromptDefault = {
+  mode: ApiCustomizationMode;
+  stage: ApiPromptStage;
+  name?: string;
+  base_prompt?: string;
+  runtime_template?: string;
+  tags?: string[];
+  estimated_output?: string;
+  compatibility?: boolean;
+  [key: string]: unknown;
+};
+
+export type ApiKeyCustomizationState = {
+  key: ApiKey;
+  prompts: ApiKeyPromptConfig[];
+  verdict_config: ApiKeyVerdictConfigRecord | null;
+  prompt_defaults?: ApiPromptDefault[];
+  defaults?: { input_budget_tokens?: number; [key: string]: unknown };
+};
+
+export type KeyPreferencesUpdate = KeyReference & {
+  trustedDomains?: string[];
+  blockedDomains?: string[];
+};
+
+export type KeyPromptSaveInput = KeyReference & {
+  mode: ApiCustomizationMode;
+  stage: ApiPromptStage;
+  instruction: string;
+  inputBudgetTokens: number;
+  outputTokenLimit?: number | null;
+  enabled?: boolean;
+  promptMode?: ApiPromptMode;
+};
+
+export type KeyPromptResetInput = KeyReference & {
+  mode: ApiCustomizationMode;
+  stage: ApiPromptStage;
+};
+
+export type KeyVerdictsSaveInput = KeyReference & { config: ApiVerdictConfig };
 
 export type LogEntry = {
   project_id?: string;
