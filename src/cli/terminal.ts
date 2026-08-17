@@ -45,7 +45,7 @@ export function createProgress(writer: Writer, enabled: boolean, color: boolean,
     update(nextPhase: string) {
       phase = nextPhase;
       highestStage = Math.max(highestStage, stageFor(mode, nextPhase));
-      if (/complete|result/i.test(nextPhase)) highestStage = maxStage(mode);
+      if (/complete|result/i.test(nextPhase)) highestStage = maxStage(mode) + 1;
       render();
     },
     upload(progress: { percent?: number } | number) {
@@ -81,7 +81,7 @@ function audioCells(stage: number, frame: number, color: boolean, uploadPercent:
 }
 
 function cell(label: string, index: number, stage: number, frame: number, color: boolean) {
-  if (index < stage || (index === stage && /complete/i.test(label))) return `${colorize("[✓]", 32, color)} ${label}`;
+  if (index < stage) return `${colorize("[✓]", 32, color)} ${label}`;
   if (index === stage) return `${colorize(`[${["◐", "◓", "◑", "◒"][frame] ?? "◐"}]`, 36, color)} ${label}`;
   return `${colorize("[ ]", 90, color)} ${label}`;
 }
@@ -89,13 +89,13 @@ function cell(label: string, index: number, stage: number, frame: number, color:
 function stageFor(mode: ProgressMode, phase: string) {
   const value = String(phase || "").toLowerCase();
   if (mode === "audio") {
-    if (value.includes("complete")) return 4;
+    if (value.includes("complete")) return 5;
     if (value.includes("verify") || value.includes("waiting") || value.includes("reconnect")) return 3;
     if (value.includes("transcrib")) return 2;
     if (value.includes("upload")) return 1;
     return 0;
   }
-  if (value.includes("complete") || value.includes("result")) return 2;
+  if (value.includes("complete") || value.includes("result")) return 3;
   if (value.includes("verify") || value.includes("waiting") || value.includes("reconnect")) return 1;
   return 0;
 }
