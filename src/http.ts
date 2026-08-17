@@ -86,6 +86,7 @@ export class HttpTransport {
       && path === "/v1/verify"
       && Boolean(requestId)
       && isFactLensProxyRuntime(baseUrl);
+    const reconnectRetries = reconnectVerify ? boundedInteger(options.maxRetries, 2, 0, 5) : 0;
     let attempt = 0;
     let pollCount = 0;
     let progressState: VerifyProgress["state"] | undefined;
@@ -173,6 +174,12 @@ export class HttpTransport {
           }
           throw timeoutError(requestId, controller.signal.reason ?? cause);
         }
+        if (reconnectVerify && attempt < reconnectRetries) {
+          progress("waiting");
+          await delay(backoff(attempt));
+          attempt += 1;
+          continue;
+        }
         if (readOnly && attempt < maxRetries) {
           progress("retrying");
           await delay(backoff(attempt));
@@ -183,7 +190,7 @@ export class HttpTransport {
           status: 0,
           code: "NETWORK_ERROR",
           requestId,
-          retryable: readOnly,
+          retryable: readOnly || reconnectVerify,
           cause,
         });
       } finally {
