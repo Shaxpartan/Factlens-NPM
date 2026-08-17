@@ -1,0 +1,35 @@
+name: Apply v6.5.0 CLI
+
+on:
+  push:
+    branches: [work/v6.5.0]
+    paths:
+      - scripts/apply-v650-cli.mjs
+      - .github/workflows/apply-v650.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/v6.5.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/apply-v650-cli.mjs
+      - name: Commit transformed CLI
+        shell: bash
+        run: |
+          if git diff --quiet -- src/cli/index.ts; then
+            echo "No CLI source changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/cli/index.ts
+          git commit -m "feat: wire v6.5.0 CLI parity"
+          git push origin HEAD:work/v6.5.0
