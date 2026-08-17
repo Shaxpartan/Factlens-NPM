@@ -77,6 +77,7 @@ export class HttpTransport {
 
     const options = request.options ?? {};
     const readOnly = request.method === "GET";
+    const runtimeVerify = request.auth === "runtime" && request.method === "POST" && path === "/v1/verify";
     const defaultRetries = readOnly ? 1 : 0;
     const maxRetries = boundedInteger(options.maxRetries, defaultRetries, 0, readOnly ? 5 : 0);
     const timeout = resolveTimeout(options, request.timeout);
@@ -91,11 +92,7 @@ export class HttpTransport {
       } catch {}
     };
     const baseUrl = request.auth === "runtime" ? this.runtimeBaseUrl : this.managementBaseUrl;
-    const reconnectVerify = request.auth === "runtime"
-      && request.method === "POST"
-      && path === "/v1/verify"
-      && Boolean(requestId)
-      && isFactLensProxyRuntime(baseUrl);
+    const reconnectVerify = runtimeVerify && Boolean(requestId) && isFactLensProxyRuntime(baseUrl);
 
     while (true) {
       const remaining = deadline - monotonicNow();
@@ -158,7 +155,7 @@ export class HttpTransport {
           status: 0,
           code: "NETWORK_ERROR",
           requestId,
-          retryable: readOnly,
+          retryable: readOnly || Boolean(runtimeVerify && requestId),
           cause,
         });
       } finally {
@@ -193,9 +190,10 @@ export class HttpTransport {
         continue;
       }
 
-      const retryable = readOnly && response.status !== 409 && isRetryableStatus(response.status);
+      const retryableStatus = response.status !== 409 && isRetryableStatus(response.status);
+      const autoRetry = readOnly && retryableStatus;
 
-      if (retryable && attempt < maxRetries) {
+      if (autoRetry && attempt < maxRetries) {
         progress("retrying");
         await delay(retryDelay(response.headers.get("retry-after"), attempt));
         attempt += 1;
@@ -210,7 +208,7 @@ export class HttpTransport {
         status: response.status,
         code,
         requestId: effectiveRequestId,
-        retryable,
+        retryable: retryableStatus && (readOnly || runtimeVerify),
         headers: new Headers(response.headers),
         ...(errorBody.details === undefined ? {} : { details: errorBody.details }),
         ...(stage === undefined ? {} : { stage }),
