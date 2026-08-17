@@ -44,6 +44,7 @@ type CliContext = {
   json: boolean;
   quiet: boolean;
   verbose: boolean;
+  trace: boolean;
   timeUnit: TimeUnit;
   jobsDir: string;
   color: boolean;
@@ -68,6 +69,7 @@ export async function runCli(argv: string[], dependencies: CliDependencies = {})
     json: flagBoolean(parsed.flags, "json"),
     quiet: flagBoolean(parsed.flags, "quiet"),
     verbose: flagBoolean(parsed.flags, "verbose"),
+    trace: flagBoolean(parsed.flags, "trace"),
     timeUnit: timeUnitFlag(parsed.flags),
     jobsDir: dependencies.jobsDir ?? join(dirname(configFile), "jobs"),
     color: dependencies.color ?? Boolean(stdout.isTTY && !("NO_COLOR" in env)),
@@ -218,8 +220,8 @@ async function doctor(client: FactLens, config: ReturnType<typeof resolveCredent
   const checks: Array<Record<string, unknown>> = [];
   if (config.apiKey) {
     try {
-      await client.usage.get({ maxRetries: 0, timeout: 15_000 });
-      checks.push({ name: "runtime API key", ok: true });
+      const detailed = await client.usage.getDetailed({ maxRetries: 0, timeout: 15_000 });
+      checks.push({ name: "runtime API key", ok: true, runtimeTiming: detailed.meta });
     } catch (error) {
       checks.push({ name: "runtime API key", ok: false, error: serializeError(error) });
     }
@@ -234,7 +236,7 @@ async function doctor(client: FactLens, config: ReturnType<typeof resolveCredent
     }
   } else checks.push({ name: "developer token", ok: false, message: `Not configured. Create one at ${DASHBOARD}.` });
 
-  return { ok: checks.some((check) => check.ok === true) && checks.every((check) => check.ok === true || check.message), checks };
+  return { version: SDK_VERSION, ok: checks.some((check) => check.ok === true) && checks.every((check) => check.ok === true || check.message), checks };
 }
 
 async function verifyCommand(client: FactLens, positionals: string[], flags: Flags, context: CliContext, resolvedConfig: ReturnType<typeof resolveCredentials>): Promise<VerifyResponse> {
@@ -312,8 +314,8 @@ async function verifyCommand(client: FactLens, positionals: string[], flags: Fla
       await updateJob(context.jobsDir, requestId, { state: "transcribing" });
       progress.update("Transcribing audio");
       const pollInput = { mode, audio_job: true, ...(claim ? { claim } : {}), ...(speaker ? { speaker } : {}), ...common } as VerifyInput & { audio_job: true };
-      const result = await client.verify(pollInput, { ...requestOptions(flags, 1_800_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); queueJobUpdate(mapped); progress.update(progressLabel(event.state)); } });
-      return attachClientElapsed(result, startedAt);
+      const detailed = await client.verifyDetailed(pollInput, { ...requestOptions(flags, 1_800_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); queueJobUpdate(mapped); progress.update(progressLabel(event.state)); } });
+      return attachRuntimeMeta(detailed.data, detailed.meta, startedAt);
     } finally {
       progress.stop();
       await pendingJobUpdate;
@@ -344,8 +346,8 @@ async function verifyCommand(client: FactLens, positionals: string[], flags: Fla
   };
   progress.start(mode === "image_post" ? "Verifying image" : "Verifying");
   try {
-    const result = await client.verify(input, { ...requestOptions(flags, mode === "audio_video" ? 1_800_000 : 180_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); queueJobUpdate(mapped); progress.update(progressLabel(event.state)); } });
-    return attachClientElapsed(result, startedAt);
+    const detailed = await client.verifyDetailed(input, { ...requestOptions(flags, mode === "audio_video" ? 1_800_000 : 180_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); queueJobUpdate(mapped); progress.update(progressLabel(event.state)); } });
+    return attachRuntimeMeta(detailed.data, detailed.meta, startedAt);
   } finally {
     progress.stop();
     await pendingJobUpdate;
@@ -492,18 +494,34 @@ async function keysCustomizationCommand(client: FactLens, args: string[], flags:
 }
 
 function outputSuccess(command: string, result: any, context: CliContext) {
-  if (context.json) { writeJson(context.writeOut, result); return; }
+  if (context.json) {
+    if (command === "verify" && result?.__responseMeta) {
+      writeJson(context.writeOut, { ...result, timing: { ...result.__responseMeta, cliTotalMs: Number(result.__clientElapsedMs) || result.__responseMeta.clientTotalMs } });
+    } else writeJson(context.writeOut, result);
+    return;
+  }
   if (command === "verify") {
     if (context.quiet) {
       const items = Array.isArray(result?.results) && result.results.length ? result.results : [result];
       context.writeOut(`${items.map((item: any) => item?.verdictId || "").filter(Boolean).join("\n")}\n`);
       return;
     }
-    context.writeOut(humanVerify(result, context.color, context.timeUnit, context.verbose));
+    context.writeOut(humanVerify(result, context.color, context.timeUnit, context.verbose, context.trace));
     return;
   }
+  if (command === "request") { context.writeOut(humanRequestDetail(result, context.color, context.timeUnit, context.verbose || context.trace)); return; }
   if (command === "doctor") {
-    context.writeOut(`FactLens doctor\n${(result.checks || []).map((check: any) => `${check.ok ? "OK" : "WARN"}  ${check.name}${check.message ? ` — ${check.message}` : ""}`).join("\n")}\n`);
+    const lines = [`FactLens doctor · v${result.version || SDK_VERSION}`];
+    for (const check of result.checks || []) {
+      lines.push(`${check.ok ? "OK" : "WARN"}  ${check.name}${check.message ? ` — ${check.message}` : ""}`);
+      const timing = check.runtimeTiming;
+      if (timing) {
+        const core = timing.serverTiming?.coreMs;
+        const edge = timing.serverTiming?.edgeMs;
+        lines.push(`    Total ${formatDuration(timing.clientTotalMs, context.timeUnit)}${core === undefined ? "" : ` · Core ${formatDuration(core, context.timeUnit)}`}${edge === undefined ? "" : ` · Edge ${formatDuration(edge, context.timeUnit)}`}`);
+      }
+    }
+    context.writeOut(`${lines.join("\n")}\n`);
     return;
   }
   if (command === "projects" && result?.selectedProjectId) { context.writeOut(`Selected project: ${result.selectedProjectId}\n`); return; }
@@ -535,12 +553,38 @@ function appendHumanVerifyResult(lines: string[], result: any, index?: number, c
   }
 }
 
-function humanVerify(result: VerifyResponse, color = false, timeUnit: TimeUnit = "auto", verbose = false) {
+function humanRequestDetail(detail: any, color = false, timeUnit: TimeUnit = "auto", verbose = false) {
+  const requestId = detail?.request_id || detail?.requestId || "unknown";
+  const lines = [colorize(`FactLens request ${requestId}`, 1, color)];
+  if (detail?.status || detail?.http_status) lines.push(`Status: ${detail.status || detail.http_status}`);
+  if (detail?.mode) lines.push(`Mode: ${detail.mode}`);
+  const responseBody = detail?.response_body && typeof detail.response_body === "object" ? detail.response_body : undefined;
+  const results = Array.isArray(detail?.results) ? detail.results : Array.isArray(responseBody?.results) ? responseBody.results : [];
+  if (results.length) {
+    lines.push("");
+    results.forEach((item: any, index: number) => { if (index > 0) lines.push(""); appendHumanVerifyResult(lines, item, index, color, verbose); });
+  } else if (responseBody?.verdictId || detail?.verdictId) {
+    lines.push("");
+    appendHumanVerifyResult(lines, responseBody || detail, undefined, color, verbose);
+  }
+  const failed = Array.isArray(detail?.failed_claims) ? detail.failed_claims : Array.isArray(detail?.failedClaims) ? detail.failedClaims : Array.isArray(responseBody?.failed_claims) ? responseBody.failed_claims : [];
+  if (failed.length) {
+    lines.push("\nFailed claims:");
+    failed.forEach((item: any, index: number) => lines.push(`${index + 1}. ${item.claim || "Unknown claim"} — ${item.error || item.message || "failed"}`));
+  }
+  const totalMs = Number(detail?.total_ms ?? detail?.duration_ms);
+  const coreMs = Number(detail?.core_ms ?? detail?.response_time_ms ?? responseBody?.response_time_ms);
+  if (Number.isFinite(totalMs) || Number.isFinite(coreMs)) lines.push(`\nTiming: ${Number.isFinite(totalMs) ? formatDuration(totalMs, timeUnit) : "n/a"} total · ${Number.isFinite(coreMs) ? formatDuration(coreMs, timeUnit) : "n/a"} core`);
+  if (detail?.error_code || detail?.error) lines.push(`Error: ${detail.error_code || JSON.stringify(detail.error)}`);
+  return `${lines.join("\n")}\n`;
+}
+
+function humanVerify(result: VerifyResponse, color = false, timeUnit: TimeUnit = "auto", verbose = false, trace = false) {
   const claimCount = Number(result.claim_count || (Array.isArray(result.results) ? result.results.length : result.claim ? 1 : 0));
   const lines = [colorize(`FactLens verification complete${claimCount > 1 ? ` · ${claimCount} claims` : ""}`, 1, color)];
   const results = Array.isArray(result.results) && result.results.length ? result.results : null;
-  if (results) results.forEach((item, index) => { if (index > 0) lines.push(""); appendHumanVerifyResult(lines, item, index, color, verbose); });
-  else appendHumanVerifyResult(lines, result, undefined, color, verbose);
+  if (results) results.forEach((item, index) => { if (index > 0) lines.push(""); appendHumanVerifyResult(lines, item, index, color, verbose || trace); });
+  else appendHumanVerifyResult(lines, result, undefined, color, verbose || trace);
   if (Array.isArray(result.failed_claims) && result.failed_claims.length) {
     lines.push("\nFailed claims:");
     result.failed_claims.forEach((item: any, index: number) => lines.push(`${index + 1}. ${item.claim || "Unknown claim"} — ${item.error || item.message || "failed"}`));
@@ -548,11 +592,27 @@ function humanVerify(result: VerifyResponse, color = false, timeUnit: TimeUnit =
   if (!claimCount && result.message) lines.push(`\n${result.message}`);
   if (result.request_id) lines.push(`\nRequest ID: ${result.request_id}`);
   if (result.response_time_ms !== undefined) lines.push(`Response time: ${result.response_time_ms} ms`);
-  const clientMs = Number((result as any).__clientElapsedMs);
-  if (Number.isFinite(clientMs) || result.response_time_ms !== undefined) {
-    const total = Number.isFinite(clientMs) ? formatDuration(clientMs, timeUnit) : "n/a";
-    const server = result.response_time_ms === undefined ? "n/a" : formatDuration(result.response_time_ms, timeUnit);
-    lines.push(`Timing: ${total} total · ${server} server`);
+  const meta = (result as any).__responseMeta;
+  const cliTotalMs = Number((result as any).__clientElapsedMs);
+  const totalMs = Number.isFinite(cliTotalMs) ? cliTotalMs : Number(meta?.clientTotalMs);
+  const coreMs = Number(meta?.serverTiming?.coreMs ?? result.response_time_ms);
+  if (Number.isFinite(totalMs) || Number.isFinite(coreMs)) {
+    const total = Number.isFinite(totalMs) ? formatDuration(totalMs, timeUnit) : "n/a";
+    const core = Number.isFinite(coreMs) ? formatDuration(coreMs, timeUnit) : "n/a";
+    lines.push(`Timing: ${total} total · ${core} core`);
+  }
+  if (meta && (verbose || trace)) {
+    const t = meta.serverTiming || {};
+    const parts = [
+      t.authMs === undefined ? null : `Auth ${formatDuration(t.authMs, timeUnit)}`,
+      t.customizationMs === undefined ? null : `Config ${formatDuration(t.customizationMs, timeUnit)}`,
+      t.coreMs === undefined ? null : `Core ${formatDuration(t.coreMs, timeUnit)}`,
+      t.postprocessMs === undefined ? null : `Post ${formatDuration(t.postprocessMs, timeUnit)}`,
+      t.edgeMs === undefined ? null : `Edge ${formatDuration(t.edgeMs, timeUnit)}`,
+    ].filter(Boolean);
+    if (parts.length) lines.push(`Runtime: ${parts.join(" · ")}`);
+    if (meta.gatewayNetworkMs !== undefined) lines.push(`Outside: ~${formatDuration(meta.gatewayNetworkMs, timeUnit)}`);
+    if (trace) lines.push(`Trace: HTTP ${meta.httpStatus ?? meta.status} · retries ${meta.retryCount ?? 0}`);
   }
   if (result.usage) lines.push(`Usage: ${JSON.stringify(result.usage)}`);
   return `${lines.join("\n")}\n`;
@@ -619,7 +679,7 @@ function requireConfirmation(flags: Flags, action: string) {
 function parseArgs(argv: string[]) {
   const positionals: string[] = [];
   const flags: Flags = new Map();
-  const booleanFlags = new Set(["json", "account", "yes", "help", "version", "no-trusted-domains", "no-blocked-domains", "quiet", "verbose"]);
+  const booleanFlags = new Set(["json", "account", "yes", "help", "version", "no-trusted-domains", "no-blocked-domains", "quiet", "verbose", "trace"]);
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index] ?? "";
     if (!token.startsWith("--")) {
@@ -699,8 +759,9 @@ function monotonicNow() {
   return typeof globalThis.performance?.now === "function" ? globalThis.performance.now() : Date.now();
 }
 
-function attachClientElapsed(result: VerifyResponse, startedAt: number) {
+function attachRuntimeMeta(result: VerifyResponse, meta: any, startedAt: number) {
   Object.defineProperty(result, "__clientElapsedMs", { value: Math.max(0, monotonicNow() - startedAt), enumerable: false, configurable: true });
+  Object.defineProperty(result, "__responseMeta", { value: meta, enumerable: false, configurable: true });
   return result;
 }
 
@@ -765,7 +826,7 @@ async function readSecret(prompt: string, input: NodeJS.ReadStream, output: Node
 }
 
 function helpText() {
-  return `FactLens CLI ${SDK_VERSION}\n\nUsage:\n  factlens configure [--api-key KEY] [--developer-token TOKEN]\n  factlens config show|clear\n  factlens doctor\n  factlens verify <claim> [--trusted-domains a.com,b.com] [--blocked-domains c.com] [--json]\n  factlens verify --file claim.txt\n  factlens verify --image image.png [--claim "Optional claim"]\n  factlens verify --audio recording.mp3 [--claim "Optional claim"] [--speaker "Name"]\n  factlens verify --audio-url https://example.com/audio.mp3\n  factlens verify --transcript "Transcript text"\n  factlens verify --transcript-file transcript.txt\n  factlens list\n  factlens kill <job-id|all>\n  factlens usage [--account] [--project ID]\n  factlens account\n  factlens projects list\n  factlens projects create <name>\n  factlens projects update <project-id> <name>\n  factlens projects delete <project-id> --yes\n  factlens projects select <project-id>\n  factlens keys list [--project ID]\n  factlens keys create <label> [--project ID]\n  factlens keys revoke <key-id> [--project ID] --yes\n  factlens keys customization get <key-id> [--project ID]\n  factlens keys customization preferences <key-id> [--trusted-domains LIST] [--blocked-domains LIST]\n  factlens keys customization prompt save <key-id> --mode MODE --stage STAGE --instruction-file FILE [--input-budget 8000]\n  factlens keys customization prompt reset <key-id> --mode MODE --stage STAGE\n  factlens keys customization verdicts save <key-id> --file verdicts.json\n  factlens keys customization verdicts reset <key-id> --yes\n  factlens logs [--project ID] [--limit N] [--endpoint verify] [--status success|failed]\n  factlens request <request-id>\n\nSource preferences:\n  --trusted-domains LIST  Prioritize matching domains for this verification\n  --blocked-domains LIST  Exclude matching domains for this verification\n  --speaker NAME          Preserve speaker attribution for audio or transcript claims\n  --instructions TEXT       Request-scoped verification instruction\n  --search-query TEXT       Override the evidence search query\n  --results-per-search N    Search result count (1-50)\n  --verdicts-file FILE      Request-scoped verdict array, including optional colors\n  --no-trusted-domains      Override saved trusted domains with an empty list\n  --no-blocked-domains      Override saved blocked domains with an empty list\n\nLocal jobs:\n  factlens list           Show active local verification jobs and concurrency\n  factlens kill ID        Stop one local job by request ID prefix\n  factlens kill all       Stop every active local FactLens job\n\nRequest options:\n  --timeout MS          Total client timeout in milliseconds\n  --timeout-seconds SEC  Total client timeout in seconds\n  --time-unit auto|ms|s Display timing units\n  --retries N           Automatic retries (0-5)\n  --quiet               Print only verdict IDs\n  --verbose             Show full source URLs and diagnostics\n  --request-id UUID  Explicit idempotency/request ID\n  --json             Machine-readable output\n\nCredentials:\n  FACTLENS_API_KEY             Project key for Verify and runtime Usage\n  FACTLENS_DEVELOPER_TOKEN     Developer token for account management\n\nGet credentials: ${DASHBOARD}\n`;
+  return `FactLens CLI ${SDK_VERSION}\n\nUsage:\n  factlens configure [--api-key KEY] [--developer-token TOKEN]\n  factlens config show|clear\n  factlens doctor\n  factlens verify <claim> [--trusted-domains a.com,b.com] [--blocked-domains c.com] [--json]\n  factlens verify --file claim.txt\n  factlens verify --image image.png [--claim "Optional claim"]\n  factlens verify --audio recording.mp3 [--claim "Optional claim"] [--speaker "Name"]\n  factlens verify --audio-url https://example.com/audio.mp3\n  factlens verify --transcript "Transcript text"\n  factlens verify --transcript-file transcript.txt\n  factlens list\n  factlens kill <job-id|all>\n  factlens usage [--account] [--project ID]\n  factlens account\n  factlens projects list\n  factlens projects create <name>\n  factlens projects update <project-id> <name>\n  factlens projects delete <project-id> --yes\n  factlens projects select <project-id>\n  factlens keys list [--project ID]\n  factlens keys create <label> [--project ID]\n  factlens keys revoke <key-id> [--project ID] --yes\n  factlens keys customization get <key-id> [--project ID]\n  factlens keys customization preferences <key-id> [--trusted-domains LIST] [--blocked-domains LIST]\n  factlens keys customization prompt save <key-id> --mode MODE --stage STAGE --instruction-file FILE [--input-budget 8000]\n  factlens keys customization prompt reset <key-id> --mode MODE --stage STAGE\n  factlens keys customization verdicts save <key-id> --file verdicts.json\n  factlens keys customization verdicts reset <key-id> --yes\n  factlens logs [--project ID] [--limit N] [--endpoint verify] [--status success|failed]\n  factlens request <request-id>\n\nSource preferences:\n  --trusted-domains LIST  Prioritize matching domains for this verification\n  --blocked-domains LIST  Exclude matching domains for this verification\n  --speaker NAME          Preserve speaker attribution for audio or transcript claims\n  --instructions TEXT       Request-scoped verification instruction\n  --search-query TEXT       Override the evidence search query\n  --results-per-search N    Search result count (1-50)\n  --verdicts-file FILE      Request-scoped verdict array, including optional colors\n  --no-trusted-domains      Override saved trusted domains with an empty list\n  --no-blocked-domains      Override saved blocked domains with an empty list\n\nLocal jobs:\n  factlens list           Show active local verification jobs and concurrency\n  factlens kill ID        Stop one local job by request ID prefix\n  factlens kill all       Stop every active local FactLens job\n\nRequest options:\n  --timeout MS          Total client timeout in milliseconds\n  --timeout-seconds SEC  Total client timeout in seconds\n  --time-unit auto|ms|s Display timing units\n  --retries N           Automatic retries (0-5)\n  --quiet               Print only verdict IDs\n  --verbose             Show full source URLs and runtime breakdown\n  --trace               Full safe transport/runtime trace\n  --request-id UUID  Explicit idempotency/request ID\n  --json             Machine-readable output\n\nCredentials:\n  FACTLENS_API_KEY             Project key for Verify and runtime Usage\n  FACTLENS_DEVELOPER_TOKEN     Developer token for account management\n\nGet credentials: ${DASHBOARD}\n`;
 }
 
 const invokedPath = process.argv[1] || "";

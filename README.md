@@ -8,7 +8,7 @@ The official Node.js, TypeScript SDK, and command-line interface for the FactLen
 
 FactLens exposes a focused runtime: **Verify**. Transcription, evidence retrieval, safety checks, and AI analysis remain internal verification stages rather than standalone provider commands.
 
-**Current package:** `6.5.0`  
+**Current package:** `6.7.0`  
 **Runtime:** Node.js 18+
 
 ## Install
@@ -52,9 +52,25 @@ The CLI can store them in the operating-system user configuration directory:
 ```bash
 factlens configure
 factlens config show
+factlens doctor
 ```
 
 `config show` masks secrets. Environment variables override saved CLI credentials.
+
+## v6.7.0 runtime metadata
+
+Ordinary SDK calls remain source-compatible:
+
+```ts
+const result = await factlens.verify({ mode: "text", claim: "Earth orbits the Sun." });
+```
+
+Use the additive detailed path when you need transport/runtime diagnostics:
+
+```ts
+const { data, meta } = await factlens.verifyDetailed({ mode: "text", claim: "Earth orbits the Sun." });
+console.log(meta.serverTiming.coreMs, meta.serverTiming.edgeMs, meta.gatewayNetworkMs);
+```
 
 ## CLI
 
@@ -90,7 +106,7 @@ The CLI streams local audio through FactLens's resumable upload path. Audio is l
 
 ### Forward-only progress
 
-Interactive terminals use the v6.5.0 animated forward phase rail. It never runs backward:
+Interactive terminals use a forward-only animated phase rail. It never runs backward:
 
 ```text
 FactLens  TEXT    1.842s   [✓] Sent  ━━━  [◐] Verifying  ━━━  [ ] Result
@@ -152,7 +168,7 @@ The old millisecond option remains backward compatible:
 factlens verify "A claim" --timeout 90000
 ```
 
-v6.5.0 also accepts seconds:
+v6.7.0 continues to accept seconds:
 
 ```bash
 factlens verify "A claim" --timeout-seconds 90
@@ -166,7 +182,7 @@ factlens verify "A claim" --time-unit ms
 factlens verify "A claim" --time-unit s
 ```
 
-Final timing distinguishes **total client wall time** from the server's `response_time_ms`, so local file preparation/audio upload is no longer mistaken for server pipeline time.
+v6.7.0 consumes the API's additive `Server-Timing` contract. Default output shows **total client wall time** and **core verification time**. `--verbose` adds Auth/Config/Core/Post/Edge plus the approximate outside-network remainder; `--trace` adds safe HTTP/retry diagnostics. `response_time_ms` remains core verification time and is never relabeled as total server time.
 
 ### Output modes
 
@@ -178,8 +194,9 @@ factlens verify "A claim" --json
 
 - `--quiet`: verdict IDs only.
 - default: readable claim/verdict/evidence/source summary.
-- `--verbose`: full source URLs and diagnostics.
-- `--json`: unmodified machine-readable API response.
+- `--verbose`: full source URLs and runtime breakdown.
+- `--trace`: full safe transport/runtime diagnostics.
+- `--json`: machine-readable API response with additive `timing` metadata for Verify.
 
 If the API returns `verdictColor`, human output uses that exact `#RRGGBB` color. With ANSI disabled, the hex value remains visible.
 
@@ -204,7 +221,7 @@ factlens logs --limit 50 --endpoint verify
 factlens request REQUEST_ID
 ```
 
-v6.5.0 also exposes the API-key customization contract through the public developer-token management API:
+v6.7.0 preserves the API-key customization contract through the public developer-token management API:
 
 ```bash
 factlens keys customization get KEY_ID --project PROJECT_ID
@@ -475,3 +492,7 @@ See [SECURITY.md](SECURITY.md). Never put live API keys, developer tokens, or se
 ## License
 
 MIT
+
+### 6.5.0 → 6.7.0
+
+No change is required for ordinary `client.verify()` callers. v6.7.0 adds `verifyDetailed()`, runtime timing metadata, conservative one-retry behavior for read-only GETs, AbortSignal support, richer safe errors, CLI `--trace`, and non-billable `factlens doctor`. Billable Verify POSTs and mutations are not automatically retried.

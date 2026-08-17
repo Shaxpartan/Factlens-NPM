@@ -85,10 +85,16 @@ export class HttpTransport {
     const deadline = startedAt + timeout;
     const requestId = resolveRequestId(options.requestId, Boolean(request.automaticRequestId));
     let attempt = 0;
-    const progress = (state: "sending" | "waiting" | "transcribing" | "retrying" | "complete") => {
+    let pollCount = 0;
+    let progressState: string | undefined;
+    let phaseStartedAt = startedAt;
+    const progress = (state: "sending" | "waiting" | "transcribing" | "retrying" | "complete", extras: Record<string, unknown> = {}) => {
       try {
-        const elapsedMs = Math.max(0, monotonicNow() - startedAt);
-        options.onProgress?.({ state, elapsedMs, elapsedSeconds: elapsedMs / 1000, ...(requestId ? { requestId } : {}), attempt });
+        const now = monotonicNow();
+        if (progressState !== state) { progressState = state; phaseStartedAt = now; }
+        const elapsedMs = Math.max(0, now - startedAt);
+        const phase = state === "transcribing" ? "transcription" : state === "sending" || state === "retrying" ? "verifying" : state;
+        options.onProgress?.({ state, phase, elapsedMs, elapsedSeconds: elapsedMs / 1000, phaseElapsedMs: Math.max(0, now - phaseStartedAt), pollCount, ...(requestId ? { requestId } : {}), attempt, ...extras });
       } catch {}
     };
     const baseUrl = request.auth === "runtime" ? this.runtimeBaseUrl : this.managementBaseUrl;
@@ -170,6 +176,7 @@ export class HttpTransport {
           headers: response.headers,
           clientTotalMs: Math.max(0, monotonicNow() - startedAt),
           status: response.status,
+          retryCount: attempt,
         });
         if (!meta.requestId && requestId) meta.requestId = requestId;
         return { data: body as T, meta };
@@ -182,8 +189,9 @@ export class HttpTransport {
         || requestId;
 
       if (response.status === 409 && code === "REQUEST_IN_PROGRESS" && requestId) {
-        progress(textValue(errorBody.stage) === "transcription" ? "transcribing" : "waiting");
         const wait = retryDelay(response.headers.get("retry-after"), 0);
+        pollCount += 1;
+        progress(textValue(errorBody.stage) === "transcription" ? "transcribing" : "waiting", { nextPollInMs: wait });
         const left = deadline - monotonicNow();
         if (left <= 0) throw timeoutError(requestId);
         await delay(Math.min(wait, left));
@@ -203,12 +211,20 @@ export class HttpTransport {
       const helpUrl = credentialHelpUrl(code) || textValue(errorBody.help_url);
       const message = actionableMessage(code, textValue(errorBody.message), helpUrl, response.status);
       const stage = verificationStage(errorBody.stage);
+      const responseMeta = buildResponseMeta({
+        headers: response.headers,
+        clientTotalMs: Math.max(0, monotonicNow() - startedAt),
+        status: response.status,
+        retryCount: attempt,
+      });
 
       throw new FactLensError(message, {
         status: response.status,
         code,
         requestId: effectiveRequestId,
         retryable: retryableStatus && (readOnly || runtimeVerify),
+        retryAfterMs: responseMeta.retryAfterMs,
+        meta: responseMeta,
         headers: new Headers(response.headers),
         ...(errorBody.details === undefined ? {} : { details: errorBody.details }),
         ...(stage === undefined ? {} : { stage }),
