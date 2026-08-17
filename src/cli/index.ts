@@ -292,7 +292,7 @@ async function verifyCommand(client: FactLens, positionals: string[], flags: Fla
     await registerJob(context.jobsDir, { id: requestId, requestId, pid: context.pid, mode, state: "uploading", startedAt: Date.now(), ...(speaker ? { speaker } : {}) });
     const interactive = !context.json && Boolean(context.stdout.isTTY);
     const progress = createProgress(context.writeErr, interactive, context.color, context.progressIntervalMs, "audio");
-    let pendingJobUpdate = Promise.resolve();
+    let pendingJobUpdate: Promise<unknown> = Promise.resolve();
     const queueJobUpdate = (state: CliJobState) => {
       pendingJobUpdate = pendingJobUpdate.then(() => updateJob(context.jobsDir, requestId, { state })).catch(() => {});
     };
@@ -338,7 +338,7 @@ async function verifyCommand(client: FactLens, positionals: string[], flags: Fla
   const progressMode = mode === "image_post" ? "image" : mode === "audio_video" ? "audio" : "text";
   const interactive = !context.json && Boolean(context.stdout.isTTY);
   const progress = createProgress(context.writeErr, interactive, context.color, context.progressIntervalMs, progressMode);
-  let pendingJobUpdate = Promise.resolve();
+  let pendingJobUpdate: Promise<unknown> = Promise.resolve();
   const queueJobUpdate = (state: CliJobState) => {
     pendingJobUpdate = pendingJobUpdate.then(() => updateJob(context.jobsDir, requestId, { state })).catch(() => {});
   };
