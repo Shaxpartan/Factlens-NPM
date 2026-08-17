@@ -8,7 +8,11 @@ export class UsageResource {
   ) {}
 
   get(options?: RequestOptions) {
-    return this.transport.request<UsageSnapshot>("/v1/usage", {
+    return this.getDetailed(options).then((response) => response.data);
+  }
+
+  getDetailed(options?: RequestOptions) {
+    return this.transport.requestDetailed<UsageSnapshot>("/v1/usage", {
       method: "GET",
       auth: "runtime",
       timeout: 60_000,

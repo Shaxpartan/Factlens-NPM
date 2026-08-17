@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { FactLensConfigurationError, FactLensError, isRetryableStatus } from "./errors.js";
 import type { VerificationStage } from "./errors.js";
-import type { RequestOptions } from "./types/index.js";
+import { buildResponseMeta } from "./runtime/response-meta.js";
+import type { DetailedResponse } from "./runtime/response-meta.js";
+import type { RequestOptions, VerifyProgress } from "./types/index.js";
 
-export const SDK_VERSION = "6.5.0";
+export const SDK_VERSION = "6.7.0";
 export const FACTLENS_DASHBOARD_URL = "https://api.factlens.pro/dashboard";
 
 const RUNTIME_VERIFY_RECONNECT_WINDOW_MS = 23_000;
@@ -55,7 +57,11 @@ export class HttpTransport {
     this.fetch = config.fetch;
   }
 
-  async request<T>(path: string, request: TransportRequest): Promise<T> {
+  request<T>(path: string, request: TransportRequest): Promise<T> {
+    return this.requestDetailed<T>(path, request).then((response) => response.data);
+  }
+
+  async requestDetailed<T>(path: string, request: TransportRequest): Promise<DetailedResponse<T>> {
     const token = request.auth === "runtime" ? this.apiKey : this.developerToken;
     if (!token) {
       const runtime = request.auth === "runtime";
@@ -68,24 +74,50 @@ export class HttpTransport {
     }
 
     const options = request.options ?? {};
-    const maxRetries = boundedInteger(options.maxRetries, 2, 0, 5);
+    const readOnly = request.method === "GET";
+    const maxRetries = readOnly ? boundedInteger(options.maxRetries, 1, 0, 5) : 0;
     const timeout = resolveTimeout(options, request.timeout);
     const startedAt = monotonicNow();
     const deadline = startedAt + timeout;
     const requestId = resolveRequestId(options.requestId, Boolean(request.automaticRequestId));
-    let attempt = 0;
-    const progress = (state: "sending" | "waiting" | "transcribing" | "retrying" | "complete") => {
-      try {
-        const elapsedMs = Math.max(0, monotonicNow() - startedAt);
-        options.onProgress?.({ state, elapsedMs, elapsedSeconds: elapsedMs / 1000, ...(requestId ? { requestId } : {}), attempt });
-      } catch {}
-    };
     const baseUrl = request.auth === "runtime" ? this.runtimeBaseUrl : this.managementBaseUrl;
     const reconnectVerify = request.auth === "runtime"
       && request.method === "POST"
       && path === "/v1/verify"
       && Boolean(requestId)
       && isFactLensProxyRuntime(baseUrl);
+    const reconnectRetries = reconnectVerify ? boundedInteger(options.maxRetries, 1, 0, 5) : 0;
+    let attempt = 0;
+    let pollCount = 0;
+    let progressState: VerifyProgress["state"] | undefined;
+    let phaseStartedAt = startedAt;
+
+    const progress = (state: VerifyProgress["state"], extras: Partial<VerifyProgress> = {}) => {
+      try {
+        const now = monotonicNow();
+        if (progressState !== state) {
+          progressState = state;
+          phaseStartedAt = now;
+        }
+        const elapsedMs = Math.max(0, now - startedAt);
+        const phase = state === "transcribing"
+          ? "transcription"
+          : state === "sending" || state === "retrying"
+            ? "verifying"
+            : state;
+        options.onProgress?.({
+          state,
+          phase,
+          elapsedMs,
+          elapsedSeconds: elapsedMs / 1000,
+          phaseElapsedMs: Math.max(0, now - phaseStartedAt),
+          pollCount,
+          ...(requestId ? { requestId } : {}),
+          attempt,
+          ...extras,
+        });
+      } catch {}
+    };
 
     while (true) {
       const remaining = deadline - monotonicNow();
@@ -136,10 +168,20 @@ export class HttpTransport {
           });
         }
         if (controller.signal.aborted) {
-          if (reconnectOnWindowExpiry && monotonicNow() < deadline) { progress("waiting"); continue; }
+          if (reconnectOnWindowExpiry && monotonicNow() < deadline) {
+            progress("waiting");
+            continue;
+          }
           throw timeoutError(requestId, controller.signal.reason ?? cause);
         }
-        if (attempt < maxRetries) {
+        if (reconnectVerify && attempt < reconnectRetries) {
+          progress("waiting");
+          await delay(backoff(attempt));
+          attempt += 1;
+          continue;
+        }
+        if (readOnly && attempt < maxRetries) {
+          progress("retrying");
           await delay(backoff(attempt));
           attempt += 1;
           continue;
@@ -148,7 +190,7 @@ export class HttpTransport {
           status: 0,
           code: "NETWORK_ERROR",
           requestId,
-          retryable: true,
+          retryable: readOnly || reconnectVerify,
           cause,
         });
       } finally {
@@ -157,17 +199,30 @@ export class HttpTransport {
       }
 
       const body = await responseBody(response);
-      if (response.ok) { progress("complete"); return body as T; }
-
-      const errorBody = isRecord(body) ? body as ErrorBody : {};
-      const code = textValue(errorBody.error) || `HTTP_${response.status}`;
-      const effectiveRequestId = textValue(errorBody.request_id)
+      const bodyRequestId = isRecord(body) ? textValue((body as ErrorBody).request_id) : undefined;
+      const effectiveRequestId = bodyRequestId
         || response.headers.get("x-factlens-request-id")
         || requestId;
 
+      if (response.ok) {
+        const meta = buildResponseMeta({
+          headers: response.headers,
+          clientTotalMs: Math.max(0, monotonicNow() - startedAt),
+          status: response.status,
+          retryCount: attempt,
+        });
+        if (!meta.requestId && effectiveRequestId) meta.requestId = effectiveRequestId;
+        progress("complete");
+        return { data: body as T, meta };
+      }
+
+      const errorBody = isRecord(body) ? body as ErrorBody : {};
+      const code = textValue(errorBody.error) || `HTTP_${response.status}`;
+
       if (response.status === 409 && code === "REQUEST_IN_PROGRESS" && requestId) {
-        progress(textValue(errorBody.stage) === "transcription" ? "transcribing" : "waiting");
         const wait = retryDelay(response.headers.get("retry-after"), 0);
+        pollCount += 1;
+        progress(textValue(errorBody.stage) === "transcription" ? "transcribing" : "waiting", { nextPollInMs: wait });
         const left = deadline - monotonicNow();
         if (left <= 0) throw timeoutError(requestId);
         await delay(Math.min(wait, left));
@@ -175,8 +230,7 @@ export class HttpTransport {
       }
 
       const retryable = response.status === 409 ? false : isRetryableStatus(response.status);
-
-      if (retryable && attempt < maxRetries) {
+      if (readOnly && retryable && attempt < maxRetries) {
         progress("retrying");
         await delay(retryDelay(response.headers.get("retry-after"), attempt));
         attempt += 1;
@@ -186,12 +240,21 @@ export class HttpTransport {
       const helpUrl = credentialHelpUrl(code) || textValue(errorBody.help_url);
       const message = actionableMessage(code, textValue(errorBody.message), helpUrl, response.status);
       const stage = verificationStage(errorBody.stage);
+      const meta = buildResponseMeta({
+        headers: response.headers,
+        clientTotalMs: Math.max(0, monotonicNow() - startedAt),
+        status: response.status,
+        retryCount: attempt,
+      });
+      if (!meta.requestId && effectiveRequestId) meta.requestId = effectiveRequestId;
 
       throw new FactLensError(message, {
         status: response.status,
         code,
         requestId: effectiveRequestId,
         retryable,
+        ...(meta.retryAfterMs === undefined ? {} : { retryAfterMs: meta.retryAfterMs }),
+        meta,
         headers: new Headers(response.headers),
         ...(errorBody.details === undefined ? {} : { details: errorBody.details }),
         ...(stage === undefined ? {} : { stage }),

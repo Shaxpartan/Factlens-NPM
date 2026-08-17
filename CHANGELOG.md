@@ -4,6 +4,16 @@ All notable changes to this package are documented here.
 
 ## Unreleased
 
+## 6.7.0 - 2026-08-17
+
+- Add `verifyDetailed()` and typed runtime response metadata parsed from `Server-Timing`, including Auth/Config/Core/Post/Edge, client total, outside-network estimate, retry count, and bounded `Retry-After`.
+- Preserve ordinary `verify()` return shapes and v6.5 caller compatibility.
+- Add AbortSignal composition and safe runtime metadata on SDK errors.
+- Retry transient read-only GET failures once by default while keeping billable Verify POSTs and mutations no-auto-retry.
+- Add CLI core-vs-total timing, `--verbose` runtime breakdown, `--trace`, and non-billable `factlens doctor`.
+- Render request-detail result/verdict cards without legacy Input/Pipeline presentation.
+- Preserve forward-only progress, exact API verdict colors, and `NO_COLOR` behavior.
+
 ## 6.5.0 - 2026-08-17
 
 - Add full current Verify response typing, including `verdictColor`, multi-claim results, `failed_claims`, no-claim messages, and richer source/result structures.

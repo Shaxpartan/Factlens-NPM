@@ -9,11 +9,19 @@ export type FactLensClientOptions = {
 };
 
 export type VerifyProgressState = "sending" | "waiting" | "transcribing" | "retrying" | "complete";
+export type VerifyProgressPhase = "prepare" | "upload" | "transcription" | "waiting" | "verifying" | "complete";
 
 export type VerifyProgress = {
   state: VerifyProgressState;
+  phase?: VerifyProgressPhase;
   elapsedMs: number;
   elapsedSeconds: number;
+  phaseElapsedMs?: number;
+  pollCount?: number;
+  nextPollInMs?: number;
+  uploadedBytes?: number;
+  totalBytes?: number;
+  percent?: number;
   requestId?: string;
   attempt: number;
 };
@@ -277,7 +285,24 @@ export type LogPage = {
   next_cursor: string | null;
 };
 
-export type RequestDetail = LogEntry & Record<string, unknown>;
+export type RequestDetailResult = VerifyResult & {
+  verdictName?: string;
+  verdict_name?: string;
+  verdict_color?: string;
+};
+
+export type RequestDetail = LogEntry & {
+  status?: string;
+  total_ms?: number;
+  core_ms?: number;
+  response_time_ms?: number;
+  usage?: UsageSnapshot | Record<string, unknown>;
+  results?: RequestDetailResult[];
+  failed_claims?: VerifyClaimFailure[];
+  failedClaims?: VerifyClaimFailure[];
+  error?: Record<string, unknown> | null;
+  [key: string]: unknown;
+};
 
 export type AccountUsageOptions = ProjectReference;
 export type AccountUsageResponse = {

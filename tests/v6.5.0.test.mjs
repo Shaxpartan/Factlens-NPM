@@ -93,7 +93,7 @@ test('progress design is a forward phase rail and retains ANSI color support', a
   assert.doesNotMatch(joined, /●.*━.*●/);
 });
 
-test('CLI uses API verdictColor truecolor and presents client/server timing separately', async () => {
+test('CLI uses API verdictColor truecolor and presents client/core timing separately', async () => {
   const h = runtimeHarness(async () => Response.json({
     request_id: '01914f52-79f6-4d4f-b456-426614174010',
     claim: 'Claim',
@@ -110,7 +110,7 @@ test('CLI uses API verdictColor truecolor and presents client/server timing sepa
   const text = h.out.join('');
   assert.match(text, /\x1b\[38;2;18;58;188m/);
   assert.match(text, /Timing/i);
-  assert.match(text, /server/i);
+  assert.match(text, /core/i);
   assert.match(text, /0\.900s/);
 });
 

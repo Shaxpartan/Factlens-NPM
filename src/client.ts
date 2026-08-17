@@ -5,12 +5,8 @@ import { KeysResource } from "./resources/keys.js";
 import { LogsResource } from "./resources/logs.js";
 import { ProjectsResource } from "./resources/projects.js";
 import { UsageResource } from "./resources/usage.js";
-import type {
-  FactLensClientOptions,
-  RequestOptions,
-  VerifyInput,
-  VerifyResponse,
-} from "./types/index.js";
+import type { FactLensClientOptions, RequestOptions, VerifyInput, VerifyResponse } from "./types/index.js";
+import type { DetailedVerifyResponse } from "./types/runtime.js";
 
 const DEFAULT_BASE_URL = "https://api.factlens.pro";
 
@@ -70,9 +66,13 @@ export default class FactLens {
     this.usage = new UsageResource(this.transport, () => this.projects.selected());
   }
 
-  verify(input: VerifyInput, options?: RequestOptions) {
+  async verify(input: VerifyInput, options?: RequestOptions): Promise<VerifyResponse> {
+    return (await this.verifyDetailed(input, options)).data;
+  }
+
+  async verifyDetailed(input: VerifyInput, options?: RequestOptions): Promise<DetailedVerifyResponse> {
     const longFormAudio = input.mode === "audio_video" && Boolean(input.audio_url);
-    return this.transport.request<VerifyResponse>("/v1/verify", {
+    return this.transport.requestDetailed<VerifyResponse>("/v1/verify", {
       method: "POST",
       auth: "runtime",
       body: input,

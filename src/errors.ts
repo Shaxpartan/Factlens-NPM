@@ -1,3 +1,5 @@
+import type { FactLensResponseMeta } from "./runtime/response-meta.js";
+
 export type VerificationStage = "transcription" | "search" | "analysis" | "moderation" | "verification";
 
 export type FactLensErrorOptions = {
@@ -5,6 +7,8 @@ export type FactLensErrorOptions = {
   code: string;
   requestId?: string | undefined;
   retryable?: boolean;
+  retryAfterMs?: number;
+  meta?: FactLensResponseMeta;
   headers?: Headers;
   details?: unknown;
   stage?: VerificationStage;
@@ -17,6 +21,8 @@ export class FactLensError extends Error {
   readonly code: string;
   readonly requestId: string | undefined;
   readonly retryable: boolean;
+  readonly retryAfterMs: number | undefined;
+  readonly meta: FactLensResponseMeta | undefined;
   readonly headers: Headers;
   readonly details: unknown;
   readonly stage: VerificationStage | undefined;
@@ -27,8 +33,10 @@ export class FactLensError extends Error {
     this.name = "FactLensError";
     this.status = options.status;
     this.code = options.code;
-    this.requestId = options.requestId;
+    this.requestId = options.requestId ?? options.meta?.requestId;
     this.retryable = options.retryable ?? isRetryableStatus(options.status);
+    this.retryAfterMs = options.retryAfterMs ?? options.meta?.retryAfterMs;
+    this.meta = options.meta;
     this.headers = options.headers ?? new Headers();
     this.details = options.details;
     this.stage = options.stage;

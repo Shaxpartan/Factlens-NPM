@@ -21,7 +21,7 @@ test("verify sends the project key, SDK metadata, JSON body, and one UUID reques
   assert.equal(request.init.method, "POST");
   assert.equal(headers.get("authorization"), "Bearer fl_live_project");
   assert.equal(headers.get("x-factlens-sdk"), "node");
-  assert.equal(headers.get("x-factlens-sdk-version"), "6.5.0");
+  assert.equal(headers.get("x-factlens-sdk-version"), "6.7.0");
   assert.match(headers.get("x-request-id"), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   assert.deepEqual(JSON.parse(request.init.body), { mode: "text", claim: "The sky is blue." });
   assert.equal(result.verdictId, "TRUE");
@@ -68,28 +68,18 @@ test("verify forwards speaker and long audio URL fields", async () => {
   assert.equal(body.speaker, "Jane Doe");
 });
 
-test("verify retries reuse the request ID and respect retryable response classes", async () => {
-  const ids = [];
-  let attempt = 0;
+test("billable verify POSTs are not automatically retried", async () => {
+  let attempts = 0;
   const client = new FactLens({
     apiKey: "fl_live_project",
-    fetch: async (_url, init) => {
-      attempt += 1;
-      ids.push(new Headers(init.headers).get("x-request-id"));
-      if (attempt === 1) {
-        return Response.json(
-          { error: "FACTLENS_API_BUSY", message: "Try again", request_id: ids[0] },
-          { status: 503, headers: { "Retry-After": "0" } },
-        );
-      }
-      return Response.json({ request_id: ids[0], verdictId: "TRUE" });
+    fetch: async () => {
+      attempts += 1;
+      return Response.json({ error: "FACTLENS_API_BUSY", message: "Try again" }, { status: 503, headers: { "Retry-After": "0" } });
     },
   });
 
-  const result = await client.verify({ mode: "text", claim: "Return true" }, { maxRetries: 1 });
-  assert.equal(result.verdictId, "TRUE");
-  assert.equal(attempt, 2);
-  assert.equal(ids[0], ids[1]);
+  await assert.rejects(client.verify({ mode: "text", claim: "Return true" }, { maxRetries: 5 }), FactLensError);
+  assert.equal(attempts, 1);
 });
 
 test("ordinary validation errors are structured and are not retried", async () => {
