@@ -6,7 +6,7 @@ import FactLens from "../client.js";
 import { FactLensConfigurationError } from "../errors.js";
 import { startAudioUpload } from "./audio.js";
 import { killJobs, listJobs, registerJob, removeJob, updateJob, type CliJobState } from "./jobs.js";
-import { colorize, createProgress, formatElapsed } from "./terminal.js";
+import { colorize, colorizeHex, createProgress, formatDuration, formatElapsed, type TimeUnit } from "./terminal.js";
 import { SDK_VERSION } from "../http.js";
 import type { LogListOptions, RequestOptions, VerifyInput, VerifyResponse } from "../types/index.js";
 import { clearConfig, configPath, loadConfig, maskSecret, resolveCredentials, saveConfig, type CliConfig } from "./config.js";
@@ -42,6 +42,9 @@ type CliContext = {
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WriteStream;
   json: boolean;
+  quiet: boolean;
+  verbose: boolean;
+  timeUnit: TimeUnit;
   jobsDir: string;
   color: boolean;
   progressIntervalMs: number;
@@ -63,6 +66,9 @@ export async function runCli(argv: string[], dependencies: CliDependencies = {})
     stdin: dependencies.stdin ?? process.stdin,
     stdout,
     json: flagBoolean(parsed.flags, "json"),
+    quiet: flagBoolean(parsed.flags, "quiet"),
+    verbose: flagBoolean(parsed.flags, "verbose"),
+    timeUnit: timeUnitFlag(parsed.flags),
     jobsDir: dependencies.jobsDir ?? join(dirname(configFile), "jobs"),
     color: dependencies.color ?? Boolean(stdout.isTTY && !("NO_COLOR" in env)),
     progressIntervalMs: dependencies.progressIntervalMs ?? 120,
@@ -232,17 +238,38 @@ async function doctor(client: FactLens, config: ReturnType<typeof resolveCredent
 }
 
 async function verifyCommand(client: FactLens, positionals: string[], flags: Flags, context: CliContext, resolvedConfig: ReturnType<typeof resolveCredentials>): Promise<VerifyResponse> {
+  const startedAt = monotonicNow();
   const file = flagString(flags, "file");
   const image = flagString(flags, "image");
   const audio = flagString(flags, "audio");
-  const explicitInputs = [file, image, audio].filter(Boolean);
-  if (explicitInputs.length > 1) throw usageError("Use only one of --file, --image, or --audio for a verification request.");
+  const transcriptFile = flagString(flags, "transcript-file");
+  const transcriptFlag = flagString(flags, "transcript");
+  const audioUrl = flagString(flags, "audio-url");
+  const explicitInputs = [file, image, audio, transcriptFile, transcriptFlag, audioUrl].filter(Boolean);
+  if (explicitInputs.length > 1) throw usageError("Use only one explicit input source: --file, --image, --audio, --transcript, --transcript-file, or --audio-url.");
 
   const trustedDomains = domainListFlag(flags, "trusted-domains");
   const blockedDomains = domainListFlag(flags, "blocked-domains");
+  const trustedOverride = flagBoolean(flags, "no-trusted-domains") ? [] : flags.has("trusted-domains") ? trustedDomains : undefined;
+  const blockedOverride = flagBoolean(flags, "no-blocked-domains") ? [] : flags.has("blocked-domains") ? blockedDomains : undefined;
+  if (flagBoolean(flags, "no-trusted-domains") && flags.has("trusted-domains")) throw usageError("Use either --trusted-domains or --no-trusted-domains, not both.");
+  if (flagBoolean(flags, "no-blocked-domains") && flags.has("blocked-domains")) throw usageError("Use either --blocked-domains or --no-blocked-domains, not both.");
+  const instructions = flagString(flags, "instructions");
+  const searchQuery = flagString(flags, "search-query");
+  const resultsPerSearch = flagNumber(flags, "results-per-search");
+  if (resultsPerSearch !== undefined && (resultsPerSearch < 1 || resultsPerSearch > 50)) throw usageError("--results-per-search must be between 1 and 50.");
+  const verdicts = await verdictsFromFile(flagString(flags, "verdicts-file"));
   const speaker = clean(flagString(flags, "speaker"));
+  const language = flagString(flags, "language") || "auto";
   const requestId = flagString(flags, "request-id") || randomUUID();
-  const common = { ...(trustedDomains.length ? { trusted_domains: trustedDomains } : {}), ...(blockedDomains.length ? { blocked_domains: blockedDomains } : {}) };
+  const common = {
+    ...(trustedOverride === undefined ? {} : { trusted_domains: trustedOverride }),
+    ...(blockedOverride === undefined ? {} : { blocked_domains: blockedOverride }),
+    ...(instructions ? { instructions } : {}),
+    ...(searchQuery ? { search_query: searchQuery } : {}),
+    ...(resultsPerSearch === undefined ? {} : { results_per_search: resultsPerSearch }),
+    ...(verdicts ? { verdicts } : {}),
+  };
 
   let input: VerifyInput;
   let mode: VerifyInput["mode"];
@@ -263,18 +290,38 @@ async function verifyCommand(client: FactLens, positionals: string[], flags: Fla
     if (!resolvedConfig.apiKey) throw new FactLensConfigurationError(`A FactLens project API key is required. Get one from ${DASHBOARD}.`);
     mode = "audio_video";
     await registerJob(context.jobsDir, { id: requestId, requestId, pid: context.pid, mode, state: "uploading", startedAt: Date.now(), ...(speaker ? { speaker } : {}) });
-    const progress = createProgress(context.writeErr, !context.json, context.color, context.progressIntervalMs);
+    const interactive = !context.json && Boolean(context.stdout.isTTY);
+    const progress = createProgress(context.writeErr, interactive, context.color, context.progressIntervalMs, "audio");
     progress.start("Uploading audio");
     try {
-      await startAudioUpload({ path: audio, contentType, apiKey: resolvedConfig.apiKey, requestId, language: flagString(flags, "language") || "auto", runtimeBaseUrl: resolvedConfig.runtimeBaseUrl, audioUploadUrl: context.audioUploadUrl || context.env.FACTLENS_AUDIO_UPLOAD_URL, fetch: context.fetch });
+      await startAudioUpload({
+        path: audio,
+        contentType,
+        apiKey: resolvedConfig.apiKey,
+        requestId,
+        language,
+        runtimeBaseUrl: resolvedConfig.runtimeBaseUrl,
+        audioUploadUrl: context.audioUploadUrl || context.env.FACTLENS_AUDIO_UPLOAD_URL,
+        fetch: context.fetch,
+        onProgress: (event) => progress.upload(event),
+      });
       await updateJob(context.jobsDir, requestId, { state: "transcribing" });
       progress.update("Transcribing audio");
       const pollInput = { mode, audio_job: true, ...(claim ? { claim } : {}), ...(speaker ? { speaker } : {}), ...common } as VerifyInput & { audio_job: true };
-      return await client.verify(pollInput, { ...requestOptions(flags, 1_800_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); void updateJob(context.jobsDir, requestId, { state: mapped }); progress.update(progressLabel(event.state)); } });
+      const result = await client.verify(pollInput, { ...requestOptions(flags, 1_800_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); void updateJob(context.jobsDir, requestId, { state: mapped }); progress.update(progressLabel(event.state)); } });
+      return attachClientElapsed(result, startedAt);
     } finally {
       progress.stop();
       await removeJob(context.jobsDir, requestId);
     }
+  } else if (audioUrl) {
+    mode = "audio_video";
+    input = { mode, audio_url: audioUrl, language, ...(speaker ? { speaker } : {}), ...common };
+  } else if (transcriptFile || transcriptFlag) {
+    const transcript = transcriptFile ? (await readFile(transcriptFile, "utf8")).trim() : String(transcriptFlag || "").trim();
+    if (!transcript) throw usageError("Transcript input is empty.");
+    mode = "audio_video";
+    input = { mode, transcript, ...(speaker ? { speaker } : {}), ...common };
   } else {
     const claim = requiredText(flagString(flags, "claim") || positionals.join(" "), "claim");
     if (claim.length > MAX_TEXT_CHARS) throw usageError(`Claim exceeds ${MAX_TEXT_CHARS.toLocaleString()} characters.`);
@@ -283,10 +330,13 @@ async function verifyCommand(client: FactLens, positionals: string[], flags: Fla
   }
 
   await registerJob(context.jobsDir, { id: requestId, requestId, pid: context.pid, mode, state: "verifying", startedAt: Date.now(), ...(speaker ? { speaker } : {}) });
-  const progress = createProgress(context.writeErr, !context.json, context.color, context.progressIntervalMs);
-  progress.start("Verifying");
+  const progressMode = mode === "image_post" ? "image" : mode === "audio_video" ? "audio" : "text";
+  const interactive = !context.json && Boolean(context.stdout.isTTY);
+  const progress = createProgress(context.writeErr, interactive, context.color, context.progressIntervalMs, progressMode);
+  progress.start(mode === "image_post" ? "Verifying image" : "Verifying");
   try {
-    return await client.verify(input, { ...requestOptions(flags, 180_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); void updateJob(context.jobsDir, requestId, { state: mapped }); progress.update(progressLabel(event.state)); } });
+    const result = await client.verify(input, { ...requestOptions(flags, mode === "audio_video" ? 1_800_000 : 180_000), requestId, onProgress: (event) => { const mapped = progressJobState(event.state); void updateJob(context.jobsDir, requestId, { state: mapped }); progress.update(progressLabel(event.state)); } });
+    return attachClientElapsed(result, startedAt);
   } finally {
     progress.stop();
     await removeJob(context.jobsDir, requestId);
@@ -379,7 +429,56 @@ async function keysCommand(client: FactLens, args: string[], flags: Flags) {
     requireConfirmation(flags, "API key revocation");
     return client.keys.revoke({ ...project, keyId: requiredText(args[1], "key ID") }, requestOptions(flags));
   }
+  if (action === "customization") return keysCustomizationCommand(client, args.slice(1), flags);
   throw usageError(`Unknown keys action "${action}".`);
+}
+
+async function keysCustomizationCommand(client: FactLens, args: string[], flags: Flags) {
+  const action = args[0] || "get";
+  const projectId = flagString(flags, "project");
+  const keyId = requiredText(args[1], "key ID");
+  const reference = { ...(projectId ? { projectId } : {}), keyId };
+  if (action === "get") return client.keys.customization.get(reference, requestOptions(flags));
+  if (action === "preferences") {
+    const trustedDomains = flagBoolean(flags, "no-trusted-domains") ? [] : flags.has("trusted-domains") ? domainListFlag(flags, "trusted-domains") : undefined;
+    const blockedDomains = flagBoolean(flags, "no-blocked-domains") ? [] : flags.has("blocked-domains") ? domainListFlag(flags, "blocked-domains") : undefined;
+    if (trustedDomains === undefined && blockedDomains === undefined) throw usageError("Pass a trusted or blocked domain preference to update.");
+    return client.keys.customization.updatePreferences({ ...reference, ...(trustedDomains === undefined ? {} : { trustedDomains }), ...(blockedDomains === undefined ? {} : { blockedDomains }) }, requestOptions(flags));
+  }
+  if (action === "prompt") {
+    const promptAction = args[1];
+    const promptKeyId = requiredText(args[2], "key ID");
+    const promptRef = { ...(projectId ? { projectId } : {}), keyId: promptKeyId };
+    const mode = requiredText(flagString(flags, "mode"), "mode") as "text" | "audio" | "image";
+    const stage = requiredText(flagString(flags, "stage"), "stage") as any;
+    if (promptAction === "reset") return client.keys.customization.resetPrompt({ ...promptRef, mode, stage }, requestOptions(flags));
+    if (promptAction !== "save") throw usageError("Use keys customization prompt save|reset.");
+    const instructionFile = flagString(flags, "instruction-file");
+    const instruction = instructionFile ? (await readFile(instructionFile, "utf8")).trim() : requiredText(flagString(flags, "instruction"), "instruction or --instruction-file");
+    return client.keys.customization.savePrompt({
+      ...promptRef,
+      mode,
+      stage,
+      instruction,
+      inputBudgetTokens: flagNumber(flags, "input-budget") ?? 8000,
+      promptMode: (flagString(flags, "prompt-mode") || "guided") as "guided" | "exact",
+      enabled: true,
+    }, requestOptions(flags));
+  }
+  if (action === "verdicts") {
+    const verdictAction = args[1];
+    const verdictKeyId = requiredText(args[2], "key ID");
+    const verdictRef = { ...(projectId ? { projectId } : {}), keyId: verdictKeyId };
+    if (verdictAction === "reset") {
+      requireConfirmation(flags, "verdict customization reset");
+      return client.keys.customization.resetVerdicts(verdictRef, requestOptions(flags));
+    }
+    if (verdictAction !== "save") throw usageError("Use keys customization verdicts save|reset.");
+    const file = requiredText(flagString(flags, "file"), "--file");
+    const config = await jsonFile(file);
+    return client.keys.customization.saveVerdicts({ ...verdictRef, config: config as any }, requestOptions(flags));
+  }
+  throw usageError(`Unknown customization action "${action}".`);
 }
 
 function outputSuccess(command: string, result: any, context: CliContext) {
@@ -453,7 +552,8 @@ const imageTypes: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
-  ".gif": "image/gif",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
 };
 const audioTypes: Record<string, string> = {
   ".webm": "audio/webm",
@@ -466,11 +566,13 @@ const audioTypes: Record<string, string> = {
 };
 
 function requestOptions(flags: Flags, defaultTimeout?: number): RequestOptions {
-  const timeout = flagNumber(flags, "timeout") ?? defaultTimeout;
+  const explicitMs = flagNumber(flags, "timeout");
+  const timeoutSeconds = flagDecimal(flags, "timeout-seconds");
+  if (explicitMs !== undefined && timeoutSeconds !== undefined) throw usageError("Use either --timeout (milliseconds) or --timeout-seconds, not both.");
   const maxRetries = flagNumber(flags, "retries");
   const requestId = flagString(flags, "request-id");
   return {
-    ...(timeout === undefined ? {} : { timeout }),
+    ...(explicitMs !== undefined ? { timeout: explicitMs } : timeoutSeconds !== undefined ? { timeoutSeconds } : defaultTimeout === undefined ? {} : { timeout: defaultTimeout }),
     ...(maxRetries === undefined ? {} : { maxRetries }),
     ...(requestId ? { requestId } : {}),
   };
@@ -495,7 +597,7 @@ function requireConfirmation(flags: Flags, action: string) {
 function parseArgs(argv: string[]) {
   const positionals: string[] = [];
   const flags: Flags = new Map();
-  const booleanFlags = new Set(["json", "account", "yes", "help", "version"]);
+  const booleanFlags = new Set(["json", "account", "yes", "help", "version", "no-trusted-domains", "no-blocked-domains", "quiet", "verbose"]);
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index] ?? "";
     if (!token.startsWith("--")) {
@@ -542,6 +644,42 @@ function flagNumber(flags: Flags, name: string) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0) throw usageError(`--${name} must be a non-negative number.`);
   return Math.floor(number);
+}
+
+function flagDecimal(flags: Flags, name: string) {
+  const value = flagString(flags, name);
+  if (value === undefined) return undefined;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) throw usageError(`--${name} must be a positive number.`);
+  return number;
+}
+
+function timeUnitFlag(flags: Flags): TimeUnit {
+  const value = (flagString(flags, "time-unit") || "auto").toLowerCase();
+  if (!["auto", "ms", "s"].includes(value)) throw usageError("--time-unit must be auto, ms, or s.");
+  return value as TimeUnit;
+}
+
+async function verdictsFromFile(path: string | undefined) {
+  if (!path) return undefined;
+  const value = await jsonFile(path);
+  if (!Array.isArray(value)) throw usageError("--verdicts-file must contain a JSON array of verdict definitions.");
+  return value;
+}
+
+async function jsonFile(path: string) {
+  let raw: string;
+  try { raw = await readFile(path, "utf8"); } catch { throw usageError(`Could not read ${path}.`); }
+  try { return JSON.parse(raw); } catch { throw usageError(`${path} must contain valid JSON.`); }
+}
+
+function monotonicNow() {
+  return typeof globalThis.performance?.now === "function" ? globalThis.performance.now() : Date.now();
+}
+
+function attachClientElapsed(result: VerifyResponse, startedAt: number) {
+  Object.defineProperty(result, "__clientElapsedMs", { value: Math.max(0, monotonicNow() - startedAt), enumerable: false, configurable: true });
+  return result;
 }
 
 function requiredText(value: unknown, label: string) {
@@ -605,7 +743,7 @@ async function readSecret(prompt: string, input: NodeJS.ReadStream, output: Node
 }
 
 function helpText() {
-  return `FactLens CLI ${SDK_VERSION}\n\nUsage:\n  factlens configure [--api-key KEY] [--developer-token TOKEN]\n  factlens config show|clear\n  factlens doctor\n  factlens verify <claim> [--trusted-domains a.com,b.com] [--blocked-domains c.com] [--json]\n  factlens verify --file claim.txt\n  factlens verify --image image.png [--claim "Optional claim"]\n  factlens verify --audio recording.mp3 [--claim "Optional claim"] [--speaker "Name"]\n  factlens list\n  factlens kill <job-id|all>\n  factlens usage [--account] [--project ID]\n  factlens account\n  factlens projects list\n  factlens projects create <name>\n  factlens projects update <project-id> <name>\n  factlens projects delete <project-id> --yes\n  factlens projects select <project-id>\n  factlens keys list [--project ID]\n  factlens keys create <label> [--project ID]\n  factlens keys revoke <key-id> [--project ID] --yes\n  factlens logs [--project ID] [--limit N] [--endpoint verify] [--status success|failed]\n  factlens request <request-id>\n\nSource preferences:\n  --trusted-domains LIST  Prioritize matching domains for this verification\n  --blocked-domains LIST  Exclude matching domains for this verification\n  --speaker NAME          Preserve speaker attribution for audio or transcript claims\n\nLocal jobs:\n  factlens list           Show active local verification jobs and concurrency\n  factlens kill ID        Stop one local job by request ID prefix\n  factlens kill all       Stop every active local FactLens job\n\nRequest options:\n  --timeout MS       Total client timeout\n  --retries N        Automatic retries (0-5)\n  --request-id UUID  Explicit idempotency/request ID\n  --json             Machine-readable output\n\nCredentials:\n  FACTLENS_API_KEY             Project key for Verify and runtime Usage\n  FACTLENS_DEVELOPER_TOKEN     Developer token for account management\n\nGet credentials: ${DASHBOARD}\n`;
+  return `FactLens CLI ${SDK_VERSION}\n\nUsage:\n  factlens configure [--api-key KEY] [--developer-token TOKEN]\n  factlens config show|clear\n  factlens doctor\n  factlens verify <claim> [--trusted-domains a.com,b.com] [--blocked-domains c.com] [--json]\n  factlens verify --file claim.txt\n  factlens verify --image image.png [--claim "Optional claim"]\n  factlens verify --audio recording.mp3 [--claim "Optional claim"] [--speaker "Name"]\n  factlens verify --audio-url https://example.com/audio.mp3\n  factlens verify --transcript "Transcript text"\n  factlens verify --transcript-file transcript.txt\n  factlens list\n  factlens kill <job-id|all>\n  factlens usage [--account] [--project ID]\n  factlens account\n  factlens projects list\n  factlens projects create <name>\n  factlens projects update <project-id> <name>\n  factlens projects delete <project-id> --yes\n  factlens projects select <project-id>\n  factlens keys list [--project ID]\n  factlens keys create <label> [--project ID]\n  factlens keys revoke <key-id> [--project ID] --yes\n  factlens keys customization get <key-id> [--project ID]\n  factlens keys customization preferences <key-id> [--trusted-domains LIST] [--blocked-domains LIST]\n  factlens keys customization prompt save <key-id> --mode MODE --stage STAGE --instruction-file FILE [--input-budget 8000]\n  factlens keys customization prompt reset <key-id> --mode MODE --stage STAGE\n  factlens keys customization verdicts save <key-id> --file verdicts.json\n  factlens keys customization verdicts reset <key-id> --yes\n  factlens logs [--project ID] [--limit N] [--endpoint verify] [--status success|failed]\n  factlens request <request-id>\n\nSource preferences:\n  --trusted-domains LIST  Prioritize matching domains for this verification\n  --blocked-domains LIST  Exclude matching domains for this verification\n  --speaker NAME          Preserve speaker attribution for audio or transcript claims\n  --instructions TEXT       Request-scoped verification instruction\n  --search-query TEXT       Override the evidence search query\n  --results-per-search N    Search result count (1-50)\n  --verdicts-file FILE      Request-scoped verdict array, including optional colors\n  --no-trusted-domains      Override saved trusted domains with an empty list\n  --no-blocked-domains      Override saved blocked domains with an empty list\n\nLocal jobs:\n  factlens list           Show active local verification jobs and concurrency\n  factlens kill ID        Stop one local job by request ID prefix\n  factlens kill all       Stop every active local FactLens job\n\nRequest options:\n  --timeout MS          Total client timeout in milliseconds\n  --timeout-seconds SEC  Total client timeout in seconds\n  --time-unit auto|ms|s Display timing units\n  --retries N           Automatic retries (0-5)\n  --quiet               Print only verdict IDs\n  --verbose             Show full source URLs and diagnostics\n  --request-id UUID  Explicit idempotency/request ID\n  --json             Machine-readable output\n\nCredentials:\n  FACTLENS_API_KEY             Project key for Verify and runtime Usage\n  FACTLENS_DEVELOPER_TOKEN     Developer token for account management\n\nGet credentials: ${DASHBOARD}\n`;
 }
 
 const invokedPath = process.argv[1] || "";
