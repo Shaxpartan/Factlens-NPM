@@ -49,3 +49,33 @@ jobs:
       - run: npm test
       - run: npm run test:examples
       - run: npm pack --dry-run
+
+  verified:
+    needs: test
+    if: github.ref == 'refs/heads/work/v6.7.0-runtime-integration' && !contains(github.event.head_commit.message, 'ci: record v6.7 verification')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/v6.7.0-runtime-integration
+      - name: Record verified release gate
+        run: |
+          mkdir -p docs/superpowers/verification
+          tested_sha=$(git rev-parse HEAD)
+          cat > docs/superpowers/verification/ci-v6.7.0-pass.md <<EOF
+          # FactLens NPM v6.7.0 CI Pass
+
+          Tested branch head: \`$tested_sha\`
+
+          Gates passed on Node 18, 20, and 22:
+          - npm ci
+          - npm run typecheck
+          - npm test
+          - npm run test:examples
+          - npm pack --dry-run
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/superpowers/verification/ci-v6.7.0-pass.md
+          git commit -m "ci: record v6.7 verification"
+          git push origin HEAD:work/v6.7.0-runtime-integration
