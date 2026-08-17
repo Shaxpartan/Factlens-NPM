@@ -5,7 +5,8 @@ import { KeysResource } from "./resources/keys.js";
 import { LogsResource } from "./resources/logs.js";
 import { ProjectsResource } from "./resources/projects.js";
 import { UsageResource } from "./resources/usage.js";
-import type { DetailedVerifyResponse, FactLensClientOptions, RequestOptions, VerifyInput, VerifyResponse } from "./types/index.js";
+import type { FactLensClientOptions, RequestOptions, VerifyInput, VerifyResponse } from "./types/index.js";
+import type { DetailedVerifyResponse } from "./types/runtime.js";
 
 const DEFAULT_BASE_URL = "https://api.factlens.pro";
 
