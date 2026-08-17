@@ -4,6 +4,19 @@ All notable changes to this package are documented here.
 
 ## Unreleased
 
+## 6.5.0 - 2026-08-17
+
+- Add full current Verify response typing, including `verdictColor`, multi-claim results, `failed_claims`, no-claim messages, and richer source/result structures.
+- Add request-level verdict colors and render the API's exact `#RRGGBB` color with 24-bit ANSI in human CLI output.
+- Add public developer-token SDK and CLI management for saved API-key Preferences, Prompts, and Verdicts through `client.keys.customization`.
+- Add advanced CLI Verify controls for instructions, search query, result count, transcripts, audio URLs, language, request verdict JSON, and explicit empty source-preference overrides.
+- Replace the bouncing progress cursor with a colored forward-only phase rail; completed phases never regress and text/image verification does not invent percentages.
+- Add real byte-derived resumable audio upload percentage and preserve local job cleanup ordering under progress callbacks.
+- Measure elapsed client time with a monotonic clock and distinguish total client time from API server `response_time_ms`.
+- Add `timeoutSeconds` to the SDK and `--timeout-seconds` / `--time-unit auto|ms|s` to the CLI while preserving existing millisecond timeouts.
+- Add `--quiet` and `--verbose` human output modes while keeping `--json` machine-readable.
+- Align CLI image formats with the API: PNG, JPEG, WebP, HEIC, and HEIF.
+
 ## 6.1.0 - 2026-08-16
 
 - Allow `factlens verify --image <path>` without `--claim`; optional `--claim` remains available as image focus or guidance.
