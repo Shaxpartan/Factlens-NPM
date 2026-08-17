@@ -131,7 +131,7 @@ test('progress includes phase, poll count, and server poll hint without fake per
   assert.equal('percent' in poll, false);
 });
 
-test('CLI trace reports total/core/runtime phases and JSON keeps timing structured', async () => {
+test('CLI trace reports total/Server/runtime phases and JSON keeps timing structured', async () => {
   const fetch = async (_url, init) => Response.json({
     request_id: new Headers(init.headers).get('x-request-id'),
     claim: 'A claim', verdictId: 'TRUE', verdictColor: '#16a34a', response_time_ms: 300, sources: [],
@@ -140,7 +140,7 @@ test('CLI trace reports total/core/runtime phases and JSON keeps timing structur
   const human = cliHarness(fetch);
   assert.equal(await runCli(['verify', 'A claim', '--trace', '--time-unit', 'ms'], human.deps), 0);
   const text = human.out.join('');
-  for (const expected of ['total', 'core', 'Runtime:', 'Auth', 'Config', 'Core', 'Post', 'Edge', 'Outside:', 'Trace: HTTP 200']) assert.match(text, new RegExp(expected));
+  for (const expected of ['total', 'Server', 'Runtime:', 'Auth', 'Config', 'Post', 'Edge', 'Outside:', 'Trace: HTTP 200']) assert.match(text, new RegExp(expected));
   assert.doesNotMatch(text, /total server/i);
 
   const json = cliHarness(fetch);
@@ -160,7 +160,7 @@ test('doctor uses the non-billable runtime Usage read and reports timings', asyn
   assert.deepEqual(calls, ['/v1/usage']);
   const text = h.out.join('');
   assert.match(text, /FactLens doctor · v6\.7\.0/);
-  assert.match(text, /Core 300ms/);
+  assert.match(text, /Server 300ms/);
   assert.match(text, /Edge 350ms/);
   assert.equal(text.includes('fl_live_project_key_'), false);
 });
@@ -175,7 +175,7 @@ test('request detail human output renders stored verdict results and omits legac
   } }), { FACTLENS_API_KEY: '', FACTLENS_DEVELOPER_TOKEN: 'fldev_live_developer' });
   assert.equal(await runCli(['request', 'request-67'], h.deps), 0);
   const text = h.out.join('');
-  for (const expected of ['First', 'Second', 'Verdict: TRUE', 'Verdict: FALSE', '0.5s total', '0.3s core']) assert.match(text, new RegExp(expected.replace('.', '\\.')));
+  for (const expected of ['First', 'Second', 'Verdict: TRUE', 'Verdict: FALSE', '0.5s total', '0.3s Server']) assert.match(text, new RegExp(expected.replace('.', '\\.')));
   assert.doesNotMatch(text, /\bInput\b/);
   assert.doesNotMatch(text, /\bPipeline\b/);
 });
