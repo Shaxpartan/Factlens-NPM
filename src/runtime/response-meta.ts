@@ -51,6 +51,7 @@ export function buildResponseMeta({
   if (serverTiming.edgeMs === undefined && Number.isFinite(edgeHeader) && edgeHeader >= 0) serverTiming.edgeMs = edgeHeader;
   const total = Math.max(0, Number(clientTotalMs) || 0);
   const edge = serverTiming.edgeMs;
+  const requestId = headers.get("x-factlens-request-id") || undefined;
   const selectedHeaders: Record<string, string> = {};
   for (const name of ["server-timing", "x-factlens-edge-time-ms", "x-factlens-request-id", "retry-after", "x-ratelimit-limit", "x-ratelimit-remaining"]) {
     const value = headers.get(name);
@@ -58,7 +59,7 @@ export function buildResponseMeta({
   }
   return {
     status,
-    requestId: headers.get("x-factlens-request-id") || undefined,
+    ...(requestId === undefined ? {} : { requestId }),
     clientTotalMs: total,
     ...(edge === undefined ? {} : { gatewayNetworkMs: Math.max(0, total - edge) }),
     serverTiming,
