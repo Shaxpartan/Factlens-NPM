@@ -8,6 +8,12 @@ const MAX_STREAMED_AUDIO_BYTES = 512 * 1024 * 1024;
 const TUS_CHUNK_BYTES = 6 * 1024 * 1024;
 const TUS_RETRY_DELAYS = [0, 1000, 3000, 5000] as const;
 
+export type AudioUploadProgress = {
+  uploadedBytes: number;
+  totalBytes: number;
+  percent: number;
+};
+
 export type AudioUploadOptions = {
   path: string;
   contentType: string;
@@ -17,6 +23,7 @@ export type AudioUploadOptions = {
   runtimeBaseUrl?: string | undefined;
   audioUploadUrl?: string | undefined;
   fetch?: typeof globalThis.fetch | undefined;
+  onProgress?: ((progress: AudioUploadProgress) => void) | undefined;
 };
 
 type BrokerUpload = {
@@ -61,20 +68,10 @@ export async function startAudioUpload(options: AudioUploadOptions) {
   });
   const upload = prepared.upload;
   if (!upload?.endpoint || !upload.token || !upload.bucket || !upload.object_path) {
-    throw new FactLensError("FactLens returned an invalid audio upload reservation.", {
-      status: 503,
-      code: "AUDIO_UPLOAD_PREPARE_FAILED",
-      requestId: options.requestId,
-      retryable: true,
-    });
+    throw new FactLensError("FactLens returned an invalid audio upload reservation.", { status: 503, code: "AUDIO_UPLOAD_PREPARE_FAILED", requestId: options.requestId, retryable: true });
   }
   if (Number(upload.chunk_size) !== TUS_CHUNK_BYTES) {
-    throw new FactLensError("FactLens returned an unsupported resumable upload chunk size.", {
-      status: 503,
-      code: "AUDIO_UPLOAD_PROTOCOL_MISMATCH",
-      requestId: options.requestId,
-      retryable: true,
-    });
+    throw new FactLensError("FactLens returned an unsupported resumable upload chunk size.", { status: 503, code: "AUDIO_UPLOAD_PROTOCOL_MISMATCH", requestId: options.requestId, retryable: true });
   }
 
   let cleaned = false;
@@ -82,16 +79,13 @@ export async function startAudioUpload(options: AudioUploadOptions) {
     if (cleaned) return;
     cleaned = true;
     try {
-      await brokerRequest(fetchImplementation, brokerUrl, commonHeaders, {
-        action: "cleanup",
-        request_id: options.requestId,
-        object_path: upload.object_path,
-      });
+      await brokerRequest(fetchImplementation, brokerUrl, commonHeaders, { action: "cleanup", request_id: options.requestId, object_path: upload.object_path });
     } catch {}
   };
   process.once("beforeExit", () => { void cleanup(); });
 
   try {
+    emitProgress(options.onProgress, 0, file.size);
     await tusUpload({
       fetchImplementation,
       path: options.path,
@@ -99,33 +93,18 @@ export async function startAudioUpload(options: AudioUploadOptions) {
       contentType: options.contentType,
       upload,
       requestId: options.requestId,
+      onProgress: options.onProgress,
     });
 
-    const resolved = await brokerRequest(fetchImplementation, brokerUrl, commonHeaders, {
-      action: "resolve",
-      request_id: options.requestId,
-      object_path: upload.object_path,
-    });
+    const resolved = await brokerRequest(fetchImplementation, brokerUrl, commonHeaders, { action: "resolve", request_id: options.requestId, object_path: upload.object_path });
     if (!resolved.audio_url) {
-      throw new FactLensError("FactLens could not resolve the temporary audio upload.", {
-        status: 503,
-        code: "AUDIO_UPLOAD_RESOLVE_FAILED",
-        requestId: options.requestId,
-        retryable: true,
-      });
+      throw new FactLensError("FactLens could not resolve the temporary audio upload.", { status: 503, code: "AUDIO_UPLOAD_RESOLVE_FAILED", requestId: options.requestId, retryable: true });
     }
 
     const response = await safeFetch(fetchImplementation, verifyUrl, {
       method: "POST",
-      headers: {
-        ...commonHeaders,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        mode: "audio_video",
-        audio_url: resolved.audio_url,
-        language: options.language || "auto",
-      }),
+      headers: { ...commonHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "audio_video", audio_url: resolved.audio_url, language: options.language || "auto" }),
     }, options.requestId, "FactLens could not start audio verification after upload.");
     const body = await responseBody(response);
     const code = text(body?.error);
@@ -149,11 +128,7 @@ async function releaseAcceptedLease(fetchImplementation: typeof globalThis.fetch
   for (const wait of [0, 250, 750]) {
     if (wait) await delay(wait);
     try {
-      await brokerRequest(fetchImplementation, brokerUrl, headers, {
-        action: "release",
-        request_id: requestId,
-        object_path: objectPath,
-      });
+      await brokerRequest(fetchImplementation, brokerUrl, headers, { action: "release", request_id: requestId, object_path: objectPath });
       return;
     } catch {}
   }
@@ -166,14 +141,10 @@ async function tusUpload(options: {
   contentType: string;
   upload: BrokerUpload;
   requestId: string;
+  onProgress?: ((progress: AudioUploadProgress) => void) | undefined;
 }) {
   const endpoint = String(options.upload.endpoint).trim();
-  const metadata = uploadMetadata({
-    bucketName: options.upload.bucket,
-    objectName: options.upload.object_path,
-    contentType: options.contentType,
-    cacheControl: "0",
-  });
+  const metadata = uploadMetadata({ bucketName: options.upload.bucket, objectName: options.upload.object_path, contentType: options.contentType, cacheControl: "0" });
   const creation = await safeFetch(options.fetchImplementation, endpoint, {
     method: "POST",
     headers: {
@@ -189,12 +160,7 @@ async function tusUpload(options: {
   }
   const location = creation.headers.get("location");
   if (!location) {
-    throw new FactLensError("FactLens storage did not return a resumable upload location.", {
-      status: 503,
-      code: "AUDIO_UPLOAD_TUS_FAILED",
-      requestId: options.requestId,
-      retryable: true,
-    });
+    throw new FactLensError("FactLens storage did not return a resumable upload location.", { status: 503, code: "AUDIO_UPLOAD_TUS_FAILED", requestId: options.requestId, retryable: true });
   }
   const uploadUrl = new URL(location, endpoint).toString();
   const handle = await open(options.path, "r");
@@ -206,6 +172,7 @@ async function tusUpload(options: {
       const { bytesRead } = await handle.read(chunk, 0, length, offset);
       if (bytesRead <= 0) throw new FactLensConfigurationError("The audio file changed while it was being uploaded.");
       offset = await patchChunk(options.fetchImplementation, uploadUrl, options.upload.token, chunk.subarray(0, bytesRead), offset, options.size, options.requestId);
+      emitProgress(options.onProgress, offset, options.size);
     }
   } finally {
     await handle.close();
@@ -222,23 +189,12 @@ async function patchChunk(fetchImplementation: typeof globalThis.fetch, uploadUr
       const payload = Uint8Array.from(chunk).buffer;
       response = await fetchImplementation(uploadUrl, {
         method: "PATCH",
-        headers: {
-          "Tus-Resumable": "1.0.0",
-          "Upload-Offset": String(offset),
-          "Content-Type": "application/offset+octet-stream",
-          "x-signature": token,
-        },
+        headers: { "Tus-Resumable": "1.0.0", "Upload-Offset": String(offset), "Content-Type": "application/offset+octet-stream", "x-signature": token },
         body: payload,
       });
     } catch (cause) {
       if (attempt === TUS_RETRY_DELAYS.length - 1) {
-        throw new FactLensError("FactLens lost the connection while uploading audio. The resumable upload could not continue.", {
-          status: 0,
-          code: "AUDIO_UPLOAD_NETWORK_ERROR",
-          requestId,
-          retryable: true,
-          cause,
-        });
+        throw new FactLensError("FactLens lost the connection while uploading audio. The resumable upload could not continue.", { status: 0, code: "AUDIO_UPLOAD_NETWORK_ERROR", requestId, retryable: true, cause });
       }
       const recovered = await tusOffset(fetchImplementation, uploadUrl, token, offset);
       if (recovered > requestedOffset) return recovered;
@@ -257,7 +213,7 @@ async function patchChunk(fetchImplementation: typeof globalThis.fetch, uploadUr
     }
     if (attempt === TUS_RETRY_DELAYS.length - 1) {
       const body = await responseBody(response);
-      throw responseError(response, body, requestId, "FactLens storage could not complete the resumable audio upload.", "AUDIO_UPLOAD_TUS_FAILED");
+      throw responseError(response, body, requestId, "FactLens storage could not complete the resumable upload.", "AUDIO_UPLOAD_TUS_FAILED");
     }
     const recovered = await tusOffset(fetchImplementation, uploadUrl, token, offset);
     if (recovered > requestedOffset) return recovered;
@@ -267,21 +223,20 @@ async function patchChunk(fetchImplementation: typeof globalThis.fetch, uploadUr
   return offset;
 }
 
+function emitProgress(callback: AudioUploadOptions["onProgress"], uploadedBytes: number, totalBytes: number) {
+  if (!callback || totalBytes <= 0) return;
+  try {
+    callback({ uploadedBytes, totalBytes, percent: Math.min(100, Math.max(0, (uploadedBytes / totalBytes) * 100)) });
+  } catch {}
+}
+
 function protocolOffsetError(requestId: string) {
-  return new FactLensError("FactLens storage returned an invalid resumable upload offset.", {
-    status: 502,
-    code: "AUDIO_UPLOAD_PROTOCOL_MISMATCH",
-    requestId,
-    retryable: true,
-  });
+  return new FactLensError("FactLens storage returned an invalid resumable upload offset.", { status: 502, code: "AUDIO_UPLOAD_PROTOCOL_MISMATCH", requestId, retryable: true });
 }
 
 async function tusOffset(fetchImplementation: typeof globalThis.fetch, uploadUrl: string, token: string, fallback: number) {
   try {
-    const response = await fetchImplementation(uploadUrl, {
-      method: "HEAD",
-      headers: { "Tus-Resumable": "1.0.0", "x-signature": token },
-    });
+    const response = await fetchImplementation(uploadUrl, { method: "HEAD", headers: { "Tus-Resumable": "1.0.0", "x-signature": token } });
     const offset = Number(response.headers.get("upload-offset"));
     return response.ok && Number.isSafeInteger(offset) && offset >= 0 ? offset : fallback;
   } catch {
@@ -304,13 +259,7 @@ async function safeFetch(fetchImplementation: typeof globalThis.fetch, url: stri
   try {
     return await fetchImplementation(url, init);
   } catch (cause) {
-    throw new FactLensError(message, {
-      status: 0,
-      code: "AUDIO_UPLOAD_NETWORK_ERROR",
-      requestId,
-      retryable: true,
-      cause,
-    });
+    throw new FactLensError(message, { status: 0, code: "AUDIO_UPLOAD_NETWORK_ERROR", requestId, retryable: true, cause });
   }
 }
 
