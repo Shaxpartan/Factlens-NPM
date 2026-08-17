@@ -24,10 +24,10 @@ jobs:
         shell: bash
         run: |
           set +e
-          node --check scripts/apply-v650-cli.mjs > apply-v650.log 2>&1
+          node --check scripts/apply-v650-cli.mjs > apply-v650.txt 2>&1
           check_status=$?
           if [ $check_status -eq 0 ]; then
-            node scripts/apply-v650-cli.mjs >> apply-v650.log 2>&1
+            node scripts/apply-v650-cli.mjs >> apply-v650.txt 2>&1
             run_status=$?
           else
             run_status=$check_status
@@ -35,7 +35,7 @@ jobs:
           if [ $run_status -ne 0 ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add apply-v650.log
+            git add apply-v650.txt
             git commit -m "chore: record v6.5.0 transformer failure"
             git push origin HEAD:work/v6.5.0
             exit $run_status
