@@ -159,7 +159,7 @@ test('doctor uses the non-billable runtime Usage read and reports timings', asyn
   assert.equal(await runCli(['doctor', '--time-unit', 'ms'], h.deps), 0);
   assert.deepEqual(calls, ['/v1/usage']);
   const text = h.out.join('');
-  assert.match(text, /FactLens doctor · v6\.7\.0/);
+  assert.match(text, /FactLens doctor · v6\.7\.1/);
   assert.match(text, /Server 300ms/);
   assert.match(text, /Edge 350ms/);
   assert.equal(text.includes('fl_live_project_key_'), false);

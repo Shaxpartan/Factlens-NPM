@@ -5,7 +5,7 @@ import { buildResponseMeta } from "./runtime/response-meta.js";
 import type { DetailedResponse } from "./runtime/response-meta.js";
 import type { RequestOptions, VerifyProgress } from "./types/index.js";
 
-export const SDK_VERSION = "6.7.0";
+export const SDK_VERSION = "6.7.1";
 export const FACTLENS_DASHBOARD_URL = "https://api.factlens.pro/dashboard";
 
 const RUNTIME_VERIFY_RECONNECT_WINDOW_MS = 23_000;

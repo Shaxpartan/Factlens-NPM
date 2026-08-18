@@ -12,11 +12,11 @@ const changelog = await readFile(new URL('../CHANGELOG.md', import.meta.url), 'u
 const runtimeDocs = await readFile(new URL('../docs/runtime-api.md', import.meta.url), 'utf8');
 const usageDocs = await readFile(new URL('../docs/usage-and-limits.md', import.meta.url), 'utf8');
 
-test('6.7.0 release metadata and runtime SDK header stay synchronized', () => {
-  assert.equal(packageJson.version, '6.7.0');
-  assert.equal(packageLock.version, '6.7.0');
-  assert.equal(packageLock.packages?.['']?.version, '6.7.0');
-  assert.match(httpSource, /SDK_VERSION\s*=\s*["']6\.7\.0["']/);
+test('6.7.1 release metadata and runtime SDK header stay synchronized', () => {
+  assert.equal(packageJson.version, '6.7.1');
+  assert.equal(packageLock.version, '6.7.1');
+  assert.equal(packageLock.packages?.['']?.version, '6.7.1');
+  assert.match(httpSource, /SDK_VERSION\s*=\s*["']6\.7\.1["']/);
 });
 
 test('6.7.0 keeps image claims optional in CLI and SDK', () => {
