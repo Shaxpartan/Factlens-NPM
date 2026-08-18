@@ -6,9 +6,9 @@ const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url
 const http = await readFile(new URL('../src/http.ts', import.meta.url), 'utf8');
 const client = await readFile(new URL('../src/client.ts', import.meta.url), 'utf8');
 
-test('package and SDK identify as 6.7.0', () => {
-  assert.equal(pkg.version, '6.7.0');
-  assert.match(http, /SDK_VERSION\s*=\s*["']6\.7\.0["']/);
+test('package and SDK identify as 6.7.1', () => {
+  assert.equal(pkg.version, '6.7.1');
+  assert.match(http, /SDK_VERSION\s*=\s*["']6\.7\.1["']/);
 });
 
 test('Server-Timing parser maps known phases safely and ignores malformed metrics', async () => {
